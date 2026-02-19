@@ -397,7 +397,7 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 	$headers = boniface_cybersource_signature_headers( 'POST', $resource, $body );
 
 	$response = wp_remote_post( $base_url . $resource, array(
-		'timeout' => 30,
+		'timeout' => 60,
 		'headers' => $headers,
 		'body'    => $body,
 	) );
@@ -406,7 +406,13 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 	$body_response = wp_remote_retrieve_body( $response );
 
 	if ( is_wp_error( $response ) ) {
-		return array( 'success' => false, 'error' => $response->get_error_message() );
+		$msg = $response->get_error_message();
+		$code_err = $response->get_error_code();
+		return array(
+			'success'    => false,
+			'error'      => $msg,
+			'reason_code' => $code_err ?: 'WP_ERROR',
+		);
 	}
 
 	$data = json_decode( $body_response, true );
@@ -466,6 +472,12 @@ function boniface_cybersource_ajax_capture_context() {
  */
 function boniface_cybersource_ajax_process_payment() {
 	check_ajax_referer( 'boniface_cybersource', 'nonce' );
+
+	// Give this request more time so proxy/server does not return 502 before CyberSource responds.
+	$limit = (int) ini_get( 'max_execution_time' );
+	if ( $limit > 0 && $limit < 60 ) {
+		@set_time_limit( 60 );
+	}
 
 	$token   = isset( $_POST['transient_token'] ) ? sanitize_text_field( wp_unslash( $_POST['transient_token'] ) ) : '';
 	$amount  = isset( $_POST['amount'] ) ? floatval( $_POST['amount'] ) : 0;

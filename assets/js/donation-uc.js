@@ -151,6 +151,7 @@
 		return $.ajax({
 			url: config.ajaxUrl,
 			type: 'POST',
+			timeout: 60000,
 			data: {
 				action: 'boniface_cybersource_process_payment',
 				nonce: config.nonce,
@@ -297,6 +298,11 @@
 			.catch(function (err) {
 				setSubmitState(false);
 				var msg = (err && err.error) ? err.error : (err && err.message) ? err.message : 'Something went wrong. Please try again.';
+				if (err && (err.status === 502 || err.status === 503 || err.status === 504)) {
+					msg = 'The payment request could not be completed (server ' + (err.status || '') + '). Please try again in a moment.';
+				} else if (err && err.status === 0 && (err.statusText === 'timeout' || (err.message && err.message.indexOf('timeout') !== -1))) {
+					msg = 'The request took too long. Please check your connection and try again.';
+				}
 				if ($('#donation-payment-step').is(':visible')) {
 					showPaymentStepError(msg);
 				} else {

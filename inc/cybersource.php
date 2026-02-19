@@ -352,15 +352,30 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
  * @return array{success: bool, id?: string, error?: string, reason_code?: string}
  */
 function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $currency = 'USD', $bill_to = array() ) {
+	$log_prefix = '[CYBERSOURCE_PAYMENT_API] ';
+	$api_start = microtime( true );
+	
+	error_log( $log_prefix . '=== START PROCESS PAYMENT FUNCTION ===' );
+	error_log( $log_prefix . 'Amount: ' . $amount . ' ' . $currency );
+	error_log( $log_prefix . 'Token length: ' . strlen( $transient_token_jwt ) );
+	
+	error_log( $log_prefix . 'Step A: Getting config...' );
 	$config = boniface_cybersource_config();
 	if ( ! $config ) {
+		error_log( $log_prefix . 'ERROR: CyberSource not configured' );
 		return array( 'success' => false, 'error' => 'CyberSource is not configured.' );
 	}
+	error_log( $log_prefix . 'Step A: Config loaded, merchant_id: ' . substr( $config['merchant_id'], 0, 8 ) . '...' );
+	error_log( $log_prefix . 'Step A: Environment: ' . ( isset( $config['env'] ) ? $config['env'] : 'unknown' ) );
 
 	$total_amount = number_format( (float) $amount, 2, '.', '' );
 	$resource = '/pts/v2/payments';
 	$base_url = boniface_cybersource_base_url();
+	error_log( $log_prefix . 'Step B: Base URL: ' . $base_url );
+	error_log( $log_prefix . 'Step B: Resource: ' . $resource );
+	error_log( $log_prefix . 'Step B: Total amount: ' . $total_amount );
 
+	error_log( $log_prefix . 'Step C: Building payload...' );
 	$payload = array(
 		'clientReferenceInformation' => array(
 			'code' => 'donation-' . substr( uniqid( '', true ), -8 ),
@@ -393,37 +408,97 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 		),
 	);
 
+	error_log( $log_prefix . 'Step C: Payload built, encoding JSON...' );
 	$body = wp_json_encode( $payload );
+	$body_size = strlen( $body );
+	error_log( $log_prefix . 'Step C: Body size: ' . $body_size . ' bytes' );
+	
+	error_log( $log_prefix . 'Step D: Generating signature headers...' );
 	$headers = boniface_cybersource_signature_headers( 'POST', $resource, $body );
+	error_log( $log_prefix . 'Step D: Headers generated, count: ' . count( $headers ) );
+	if ( isset( $headers['v-c-merchant-id'] ) ) {
+		error_log( $log_prefix . 'Step D: Merchant ID in headers: ' . substr( $headers['v-c-merchant-id'], 0, 8 ) . '...' );
+	}
 
-	$response = wp_remote_post( $base_url . $resource, array(
+	$request_url = $base_url . $resource;
+	error_log( $log_prefix . 'Step E: Making wp_remote_post request...' );
+	error_log( $log_prefix . 'Step E: URL: ' . $request_url );
+	error_log( $log_prefix . 'Step E: Timeout: 60 seconds' );
+	error_log( $log_prefix . 'Step E: Memory before request: ' . round( memory_get_usage( true ) / 1024 / 1024, 2 ) . ' MB' );
+	$request_start = microtime( true );
+	
+	$response = wp_remote_post( $request_url, array(
 		'timeout' => 60,
 		'headers' => $headers,
 		'body'    => $body,
 	) );
+	
+	$request_duration = microtime( true ) - $request_start;
+	error_log( $log_prefix . 'Step E: wp_remote_post completed' );
+	error_log( $log_prefix . 'Step E: Request duration: ' . round( $request_duration * 1000, 2 ) . ' ms' );
+	error_log( $log_prefix . 'Step E: Memory after request: ' . round( memory_get_usage( true ) / 1024 / 1024, 2 ) . ' MB' );
 
+	error_log( $log_prefix . 'Step F: Processing response...' );
 	$code = wp_remote_retrieve_response_code( $response );
 	$body_response = wp_remote_retrieve_body( $response );
-
+	$response_size = strlen( $body_response );
+	
+	error_log( $log_prefix . 'Step F: Response code: ' . ( $code ? $code : 'NULL' ) );
+	error_log( $log_prefix . 'Step F: Response body size: ' . $response_size . ' bytes' );
+	
 	if ( is_wp_error( $response ) ) {
 		$msg = $response->get_error_message();
 		$code_err = $response->get_error_code();
+		error_log( $log_prefix . 'ERROR: WP_Error detected' );
+		error_log( $log_prefix . 'ERROR: Error code: ' . $code_err );
+		error_log( $log_prefix . 'ERROR: Error message: ' . $msg );
+		error_log( $log_prefix . 'ERROR: Request duration before error: ' . round( $request_duration * 1000, 2 ) . ' ms' );
 		return array(
 			'success'    => false,
 			'error'      => $msg,
 			'reason_code' => $code_err ?: 'WP_ERROR',
 		);
 	}
+	
+	error_log( $log_prefix . 'Step F: Response is valid (not WP_Error)' );
+	if ( $response_size > 0 ) {
+		$body_preview = substr( $body_response, 0, 200 );
+		error_log( $log_prefix . 'Step F: Response body preview: ' . $body_preview );
+	} else {
+		error_log( $log_prefix . 'WARNING: Response body is empty' );
+	}
 
+	error_log( $log_prefix . 'Step G: Decoding JSON response...' );
 	$data = json_decode( $body_response, true );
+	if ( json_last_error() !== JSON_ERROR_NONE ) {
+		error_log( $log_prefix . 'ERROR: JSON decode failed: ' . json_last_error_msg() );
+		error_log( $log_prefix . 'ERROR: Response body: ' . substr( $body_response, 0, 500 ) );
+	}
+	
 	$reason_code = isset( $data['errorInformation']['reasonCode'] ) ? $data['errorInformation']['reasonCode'] : '';
 	$message = isset( $data['errorInformation']['message'] ) ? $data['errorInformation']['message'] : '';
-
+	
 	if ( $code >= 200 && $code < 300 ) {
 		$id = isset( $data['id'] ) ? $data['id'] : '';
+		$api_duration = microtime( true ) - $api_start;
+		error_log( $log_prefix . 'SUCCESS: Payment processed' );
+		error_log( $log_prefix . 'SUCCESS: Payment ID: ' . $id );
+		error_log( $log_prefix . 'SUCCESS: Total function time: ' . round( $api_duration * 1000, 2 ) . ' ms' );
+		error_log( $log_prefix . '=== END PROCESS PAYMENT FUNCTION (SUCCESS) ===' );
 		return array( 'success' => true, 'id' => $id );
 	}
 
+	$api_duration = microtime( true ) - $api_start;
+	error_log( $log_prefix . 'ERROR: Payment failed' );
+	error_log( $log_prefix . 'ERROR: HTTP code: ' . $code );
+	error_log( $log_prefix . 'ERROR: Reason code: ' . ( $reason_code ? $reason_code : 'N/A' ) );
+	error_log( $log_prefix . 'ERROR: Message: ' . ( $message ? $message : 'N/A' ) );
+	if ( isset( $data['errorInformation']['details'] ) ) {
+		error_log( $log_prefix . 'ERROR: Details: ' . json_encode( $data['errorInformation']['details'] ) );
+	}
+	error_log( $log_prefix . 'ERROR: Total function time: ' . round( $api_duration * 1000, 2 ) . ' ms' );
+	error_log( $log_prefix . '=== END PROCESS PAYMENT FUNCTION (FAILED) ===' );
+	
 	return array(
 		'success'     => false,
 		'error'       => $message ?: ( 'Payment failed (' . $code . ')' ),
@@ -471,23 +546,44 @@ function boniface_cybersource_ajax_capture_context() {
  * AJAX: Process donation payment with transient token.
  */
 function boniface_cybersource_ajax_process_payment() {
-	check_ajax_referer( 'boniface_cybersource', 'nonce' );
+	$start_time = microtime( true );
+	$start_memory = memory_get_usage( true );
+	$log_prefix = '[CYBERSOURCE_PAYMENT] ';
+	
+	error_log( $log_prefix . '=== START AJAX PROCESS PAYMENT ===' );
+	error_log( $log_prefix . 'Time: ' . date( 'Y-m-d H:i:s' ) );
+	error_log( $log_prefix . 'Memory: ' . round( $start_memory / 1024 / 1024, 2 ) . ' MB' );
+	error_log( $log_prefix . 'Max execution time: ' . ini_get( 'max_execution_time' ) );
+	error_log( $log_prefix . 'Memory limit: ' . ini_get( 'memory_limit' ) );
+	
+	try {
+		error_log( $log_prefix . 'Step 1: Checking nonce...' );
+		check_ajax_referer( 'boniface_cybersource', 'nonce' );
+		error_log( $log_prefix . 'Step 1: Nonce check passed' );
 
-	// Give this request more time so proxy/server does not return 502 before CyberSource responds.
-	$limit = (int) ini_get( 'max_execution_time' );
-	if ( $limit > 0 && $limit < 60 ) {
-		@set_time_limit( 60 );
-	}
+		// Give this request more time so proxy/server does not return 502 before CyberSource responds.
+		$limit = (int) ini_get( 'max_execution_time' );
+		error_log( $log_prefix . 'Current max_execution_time: ' . $limit );
+		if ( $limit > 0 && $limit < 60 ) {
+			@set_time_limit( 60 );
+			error_log( $log_prefix . 'Set max_execution_time to 60' );
+		}
 
-	$token   = isset( $_POST['transient_token'] ) ? sanitize_text_field( wp_unslash( $_POST['transient_token'] ) ) : '';
-	$amount  = isset( $_POST['amount'] ) ? floatval( $_POST['amount'] ) : 0;
-	$currency = isset( $_POST['currency'] ) ? sanitize_text_field( wp_unslash( $_POST['currency'] ) ) : 'USD';
-	$name    = isset( $_POST['name'] ) ? sanitize_text_field( wp_unslash( $_POST['name'] ) ) : '';
-	$email   = isset( $_POST['email'] ) ? sanitize_email( wp_unslash( $_POST['email'] ) ) : '';
+		error_log( $log_prefix . 'Step 2: Parsing POST data...' );
+		$token   = isset( $_POST['transient_token'] ) ? sanitize_text_field( wp_unslash( $_POST['transient_token'] ) ) : '';
+		$amount  = isset( $_POST['amount'] ) ? floatval( $_POST['amount'] ) : 0;
+		$currency = isset( $_POST['currency'] ) ? sanitize_text_field( wp_unslash( $_POST['currency'] ) ) : 'USD';
+		$name    = isset( $_POST['name'] ) ? sanitize_text_field( wp_unslash( $_POST['name'] ) ) : '';
+		$email   = isset( $_POST['email'] ) ? sanitize_email( wp_unslash( $_POST['email'] ) ) : '';
+		
+		error_log( $log_prefix . 'Token length: ' . strlen( $token ) );
+		error_log( $log_prefix . 'Amount: ' . $amount );
+		error_log( $log_prefix . 'Currency: ' . $currency );
 
-	if ( ! $token || $amount < 10 ) {
-		wp_send_json( array( 'success' => false, 'error' => 'Invalid request.' ) );
-	}
+		if ( ! $token || $amount < 10 ) {
+			error_log( $log_prefix . 'ERROR: Invalid request - token: ' . ( $token ? 'present' : 'missing' ) . ', amount: ' . $amount );
+			wp_send_json( array( 'success' => false, 'error' => 'Invalid request.' ) );
+		}
 
 	$bill_to = array( 'email' => $email );
 	if ( $name ) {
@@ -495,40 +591,84 @@ function boniface_cybersource_ajax_process_payment() {
 		$bill_to['firstName'] = $parts[0];
 		$bill_to['lastName']  = isset( $parts[1] ) ? $parts[1] : '';
 	}
-	$bill_to['address1']           = isset( $_POST['billing_address1'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_address1'] ) ) : '';
-	$bill_to['address2']           = isset( $_POST['billing_address2'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_address2'] ) ) : '';
-	$bill_to['locality']           = isset( $_POST['billing_locality'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_locality'] ) ) : '';
-	$bill_to['administrativeArea'] = isset( $_POST['billing_administrative_area'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_administrative_area'] ) ) : '';
-	$bill_to['postalCode']         = isset( $_POST['billing_postal_code'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_postal_code'] ) ) : '';
-	$country                       = isset( $_POST['billing_country'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_country'] ) ) : 'US';
-	if ( $country === 'OTHER' ) {
-		$country = 'US';
+		error_log( $log_prefix . 'Step 3: Building bill_to array...' );
+		$bill_to['address1']           = isset( $_POST['billing_address1'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_address1'] ) ) : '';
+		$bill_to['address2']           = isset( $_POST['billing_address2'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_address2'] ) ) : '';
+		$bill_to['locality']           = isset( $_POST['billing_locality'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_locality'] ) ) : '';
+		$bill_to['administrativeArea'] = isset( $_POST['billing_administrative_area'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_administrative_area'] ) ) : '';
+		$bill_to['postalCode']         = isset( $_POST['billing_postal_code'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_postal_code'] ) ) : '';
+		$country                       = isset( $_POST['billing_country'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_country'] ) ) : 'US';
+		if ( $country === 'OTHER' ) {
+			$country = 'US';
+		}
+		$bill_to['country'] = $country;
+		error_log( $log_prefix . 'Bill_to prepared: ' . json_encode( array_keys( $bill_to ) ) );
+
+		$before_process = microtime( true );
+		error_log( $log_prefix . 'Step 4: Calling boniface_cybersource_process_payment...' );
+		error_log( $log_prefix . 'Elapsed time so far: ' . round( ( $before_process - $start_time ) * 1000, 2 ) . ' ms' );
+		error_log( $log_prefix . 'Memory usage: ' . round( memory_get_usage( true ) / 1024 / 1024, 2 ) . ' MB' );
+		
+		$result = boniface_cybersource_process_payment( $token, $amount, $currency, $bill_to );
+		
+		$after_process = microtime( true );
+		error_log( $log_prefix . 'Step 4: Returned from boniface_cybersource_process_payment' );
+		error_log( $log_prefix . 'Process payment took: ' . round( ( $after_process - $before_process ) * 1000, 2 ) . ' ms' );
+		error_log( $log_prefix . 'Result success: ' . ( $result['success'] ? 'true' : 'false' ) );
+		if ( ! $result['success'] ) {
+			error_log( $log_prefix . 'Result error: ' . ( isset( $result['error'] ) ? $result['error'] : 'N/A' ) );
+			error_log( $log_prefix . 'Result reason_code: ' . ( isset( $result['reason_code'] ) ? $result['reason_code'] : 'N/A' ) );
+		}
+
+		if ( $result['success'] ) {
+			error_log( $log_prefix . 'Step 5: Payment successful, firing action hook...' );
+			// Optional: save donation record (e.g. custom post type or table).
+			do_action( 'boniface_donation_payment_success', array(
+				'amount'    => $amount,
+				'currency'  => $currency,
+				'name'      => $name,
+				'email'     => $email,
+				'message'   => isset( $_POST['message'] ) ? sanitize_textarea_field( wp_unslash( $_POST['message'] ) ) : '',
+				'payment_id' => isset( $result['id'] ) ? $result['id'] : '',
+				'billing'   => array(
+					'address1' => $bill_to['address1'] ?? '',
+					'address2' => $bill_to['address2'] ?? '',
+					'locality' => $bill_to['locality'] ?? '',
+					'administrativeArea' => $bill_to['administrativeArea'] ?? '',
+					'postalCode' => $bill_to['postalCode'] ?? '',
+					'country'   => $bill_to['country'] ?? 'US',
+				),
+			) );
+			error_log( $log_prefix . 'Step 5: Action hook completed' );
+		}
+
+		$total_time = microtime( true ) - $start_time;
+		$total_memory = memory_get_usage( true ) - $start_memory;
+		error_log( $log_prefix . 'Step 6: Sending JSON response' );
+		error_log( $log_prefix . 'Total elapsed time: ' . round( $total_time * 1000, 2 ) . ' ms' );
+		error_log( $log_prefix . 'Total memory used: ' . round( $total_memory / 1024 / 1024, 2 ) . ' MB' );
+		error_log( $log_prefix . 'Peak memory: ' . round( memory_get_peak_usage( true ) / 1024 / 1024, 2 ) . ' MB' );
+		error_log( $log_prefix . '=== END AJAX PROCESS PAYMENT ===' );
+
+		wp_send_json( $result );
+		
+	} catch ( Exception $e ) {
+		$error_time = microtime( true ) - $start_time;
+		error_log( $log_prefix . 'EXCEPTION CAUGHT: ' . $e->getMessage() );
+		error_log( $log_prefix . 'Exception file: ' . $e->getFile() . ':' . $e->getLine() );
+		error_log( $log_prefix . 'Exception trace: ' . $e->getTraceAsString() );
+		error_log( $log_prefix . 'Time before exception: ' . round( $error_time * 1000, 2 ) . ' ms' );
+		error_log( $log_prefix . 'Memory at exception: ' . round( memory_get_usage( true ) / 1024 / 1024, 2 ) . ' MB' );
+		wp_send_json( array( 'success' => false, 'error' => 'Server error: ' . $e->getMessage() ) );
+	} catch ( Error $e ) {
+		$error_time = microtime( true ) - $start_time;
+		error_log( $log_prefix . 'FATAL ERROR CAUGHT: ' . $e->getMessage() );
+		error_log( $log_prefix . 'Error file: ' . $e->getFile() . ':' . $e->getLine() );
+		error_log( $log_prefix . 'Error trace: ' . $e->getTraceAsString() );
+		error_log( $log_prefix . 'Time before error: ' . round( $error_time * 1000, 2 ) . ' ms' );
+		error_log( $log_prefix . 'Memory at error: ' . round( memory_get_usage( true ) / 1024 / 1024, 2 ) . ' MB' );
+		wp_send_json( array( 'success' => false, 'error' => 'Fatal error: ' . $e->getMessage() ) );
 	}
-	$bill_to['country'] = $country;
-
-	$result = boniface_cybersource_process_payment( $token, $amount, $currency, $bill_to );
-
-	if ( $result['success'] ) {
-		// Optional: save donation record (e.g. custom post type or table).
-		do_action( 'boniface_donation_payment_success', array(
-			'amount'    => $amount,
-			'currency'  => $currency,
-			'name'      => $name,
-			'email'     => $email,
-			'message'   => isset( $_POST['message'] ) ? sanitize_textarea_field( wp_unslash( $_POST['message'] ) ) : '',
-			'payment_id' => isset( $result['id'] ) ? $result['id'] : '',
-			'billing'   => array(
-				'address1' => $bill_to['address1'] ?? '',
-				'address2' => $bill_to['address2'] ?? '',
-				'locality' => $bill_to['locality'] ?? '',
-				'administrativeArea' => $bill_to['administrativeArea'] ?? '',
-				'postalCode' => $bill_to['postalCode'] ?? '',
-				'country'   => $bill_to['country'] ?? 'US',
-			),
-		) );
-	}
-
-	wp_send_json( $result );
 }
 
 /**

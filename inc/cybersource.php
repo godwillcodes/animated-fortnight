@@ -108,6 +108,41 @@ function boniface_cybersource_signature_headers( $method, $resource, $body = '' 
 }
 
 /**
+ * Normalize US state code to 2-letter format required by CyberSource.
+ * Converts full state names to codes (e.g. "California" -> "CA") and validates.
+ *
+ * @param string $state State name or code.
+ * @return string 2-letter state code or empty if invalid.
+ */
+function boniface_cybersource_normalize_state( $state ) {
+	if ( empty( $state ) ) {
+		return '';
+	}
+	$state = trim( strtoupper( $state ) );
+	// If already 2 letters and looks like a code, return as-is.
+	if ( strlen( $state ) === 2 && ctype_alpha( $state ) ) {
+		return $state;
+	}
+	// Map common full state names to 2-letter codes.
+	$state_map = array(
+		'ALABAMA' => 'AL', 'ALASKA' => 'AK', 'ARIZONA' => 'AZ', 'ARKANSAS' => 'AR',
+		'CALIFORNIA' => 'CA', 'COLORADO' => 'CO', 'CONNECTICUT' => 'CT', 'DELAWARE' => 'DE',
+		'FLORIDA' => 'FL', 'GEORGIA' => 'GA', 'HAWAII' => 'HI', 'IDAHO' => 'ID',
+		'ILLINOIS' => 'IL', 'INDIANA' => 'IN', 'IOWA' => 'IA', 'KANSAS' => 'KS',
+		'KENTUCKY' => 'KY', 'LOUISIANA' => 'LA', 'MAINE' => 'ME', 'MARYLAND' => 'MD',
+		'MASSACHUSETTS' => 'MA', 'MICHIGAN' => 'MI', 'MINNESOTA' => 'MN', 'MISSISSIPPI' => 'MS',
+		'MISSOURI' => 'MO', 'MONTANA' => 'MT', 'NEBRASKA' => 'NE', 'NEVADA' => 'NV',
+		'NEW HAMPSHIRE' => 'NH', 'NEW JERSEY' => 'NJ', 'NEW MEXICO' => 'NM', 'NEW YORK' => 'NY',
+		'NORTH CAROLINA' => 'NC', 'NORTH DAKOTA' => 'ND', 'OHIO' => 'OH', 'OKLAHOMA' => 'OK',
+		'OREGON' => 'OR', 'PENNSYLVANIA' => 'PA', 'RHODE ISLAND' => 'RI', 'SOUTH CAROLINA' => 'SC',
+		'SOUTH DAKOTA' => 'SD', 'TENNESSEE' => 'TN', 'TEXAS' => 'TX', 'UTAH' => 'UT',
+		'VERMONT' => 'VT', 'VIRGINIA' => 'VA', 'WASHINGTON' => 'WA', 'WEST VIRGINIA' => 'WV',
+		'WISCONSIN' => 'WI', 'WYOMING' => 'WY', 'DISTRICT OF COLUMBIA' => 'DC',
+	);
+	return isset( $state_map[ $state ] ) ? $state_map[ $state ] : '';
+}
+
+/**
  * Request Capture Context from CyberSource; returns JWT and client library info for frontend.
  *
  * @param float  $amount   Order amount (e.g. 25.00).
@@ -135,6 +170,18 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 		if ( strpos( $origin, 'https://' ) !== 0 ) {
 			$origin = 'https://' . ( isset( $_SERVER['HTTP_HOST'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ) ) : 'localhost' );
 		}
+	}
+
+	// Normalize administrativeArea (state) for US addresses - must be 2-letter code.
+	$country = isset( $bill_to['country'] ) ? strtoupper( trim( $bill_to['country'] ) ) : 'US';
+	if ( $country === 'US' && ! empty( $bill_to['administrativeArea'] ) ) {
+		$normalized_state = boniface_cybersource_normalize_state( $bill_to['administrativeArea'] );
+		if ( empty( $normalized_state ) ) {
+			return array( 'success' => false, 'error' => 'Invalid state code. Please use a valid 2-letter US state code (e.g., CA, NY, TX).' );
+		}
+		$bill_to['administrativeArea'] = $normalized_state;
+	} elseif ( $country === 'US' && empty( $bill_to['administrativeArea'] ) ) {
+		return array( 'success' => false, 'error' => 'State is required for US addresses.' );
 	}
 
 	$payload = array(

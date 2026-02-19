@@ -13,14 +13,29 @@
 
 	if (!$form.length) return;
 
+	function setProgress(step) {
+		var dots = document.querySelectorAll('.donation-progress-dot');
+		var lines = document.querySelectorAll('.donation-progress-line');
+		step = parseInt(step, 10) || 1;
+		dots.forEach(function (dot, i) {
+			dot.classList.toggle('active', i + 1 === step);
+		});
+		lines.forEach(function (line, i) {
+			line.classList.toggle('completed', i < step);
+		});
+	}
+
 	function setSubmitState(loading, error) {
 		var $btn = $('#donate-submit');
 		var $err = $('#donation-uc-error');
 		$btn.prop('disabled', !!loading);
+		$btn.toggleClass('is-loading', !!loading);
 		if (loading) {
-			$btn.find('.btn-text').text('Preparing…');
+			$btn.find('.donate-btn-text').text('Preparing…');
+			$btn.find('.donate-btn-icon').addClass('hidden');
 		} else {
-			$btn.find('.btn-text').text('Proceed to payment');
+			$btn.find('.donate-btn-text').text('Proceed to payment');
+			$btn.find('.donate-btn-icon').removeClass('hidden');
 		}
 		if (error && $err.length) {
 			$err.text(error).removeClass('hidden');
@@ -29,23 +44,39 @@
 		}
 	}
 
+	function showDetailsStep() {
+		$('#donation-payment-step').addClass('hidden').removeClass('donation-step-visible').addClass('donation-step-hidden');
+		$('#donation-success-step, #donation-error-step').addClass('hidden').removeClass('donation-step-visible').addClass('donation-step-hidden');
+		$('#donation-details-step').removeClass('hidden').removeClass('donation-step-hidden').addClass('donation-step-visible');
+		setProgress(1);
+	}
+
 	function showPaymentStep() {
-		$('#donation-details-step').addClass('hidden');
-		$('#donation-payment-step').removeClass('hidden');
+		$('#donation-details-step').removeClass('donation-step-visible').addClass('donation-step-hidden');
+		$('#donation-success-step, #donation-error-step').addClass('hidden');
+		$('#donation-payment-step').removeClass('hidden').removeClass('donation-step-hidden').addClass('donation-step-visible');
+		$('#donation-payment-skeleton').removeClass('hidden');
+		setProgress(2);
+	}
+
+	function hidePaymentSkeleton() {
+		$('#donation-payment-skeleton').addClass('hidden');
 	}
 
 	function showSuccessStep(message) {
 		$('#donation-payment-step').addClass('hidden');
-		var $done = $('#donation-success-step');
-		$done.find('.success-message').text(message || 'Thank you. Your donation has been processed.');
-		$done.removeClass('hidden');
+		$('#donation-success-step').find('.success-message').text(message || 'Thank you. Your donation has been processed.');
+		$('#donation-success-step').removeClass('hidden').removeClass('donation-step-hidden').addClass('donation-step-visible');
+		$('#donation-error-step').addClass('hidden');
+		setProgress(3);
 	}
 
 	function showErrorStep(message) {
-		var $errStep = $('#donation-error-step');
-		$errStep.find('.error-message').text(message || 'Something went wrong.');
-		$errStep.removeClass('hidden');
 		$('#donation-payment-step').addClass('hidden');
+		$('#donation-error-step').find('.error-message').text(message || 'Something went wrong.');
+		$('#donation-error-step').removeClass('hidden').removeClass('donation-step-hidden').addClass('donation-step-visible');
+		$('#donation-success-step').addClass('hidden');
+		setProgress(3);
 	}
 
 	function loadScript(src, integrity) {
@@ -151,11 +182,10 @@
 
 	function runUnifiedCheckout(captureContext, clientLibrary, clientLibraryIntegrity) {
 		clearPaymentStepError();
-		$('#uc-loading-message').removeClass('hidden');
-		var $sel = document.getElementById('buttonPaymentListContainer');
-		var $screen = document.getElementById('embeddedPaymentContainer');
-		if ($sel) $sel.innerHTML = '';
-		if ($screen) $screen.innerHTML = '';
+		var sel = document.getElementById('buttonPaymentListContainer');
+		var screen = document.getElementById('embeddedPaymentContainer');
+		if (sel) sel.innerHTML = '';
+		if (screen) screen.innerHTML = '';
 
 		return loadScript(clientLibrary, clientLibraryIntegrity || '')
 			.then(function () {
@@ -179,26 +209,29 @@
 						paymentScreen: '#embeddedPaymentContainer'
 					}
 				};
-				$('#uc-loading-message').addClass('hidden');
 				return new Promise(function (resolve, reject) {
 					var resolved = false;
 					function done(val) {
 						if (resolved) return;
 						resolved = true;
 						clearTimeout(timeoutId);
+						hidePaymentSkeleton();
 						resolve(val);
 					}
 					function fail(err) {
 						if (resolved) return;
 						resolved = true;
 						clearTimeout(timeoutId);
+						hidePaymentSkeleton();
 						reject(err);
 					}
 					var timeoutId = setTimeout(function () {
-						var hasContent = ($sel && ($sel.querySelector('iframe') || $sel.children.length > 0)) ||
-							($screen && ($screen.querySelector('iframe') || $screen.children.length > 0));
+						var hasContent = (sel && (sel.querySelector('iframe') || sel.children.length > 0)) ||
+							(screen && (screen.querySelector('iframe') || screen.children.length > 0));
 						if (!hasContent) {
 							fail(new Error('Payment form did not load. Check the browser console (F12) for errors, then refresh and try again.'));
+						} else {
+							hidePaymentSkeleton();
 						}
 					}, 5000);
 					setTimeout(function () {
@@ -249,6 +282,7 @@
 			})
 			.then(function (transientToken) {
 				if (!transientToken) throw new Error('No payment token received');
+				$('#donate-submit').find('.donate-btn-text').text('Processing…');
 				setSubmitState(true);
 				return processPayment(transientToken);
 			})
@@ -267,11 +301,22 @@
 					showPaymentStepError(msg);
 				} else {
 					if (!$('#donation-uc-error').length) {
-						$form.find('button[type="submit"]').before('<p id="donation-uc-error" class="text-red-600 text-sm mt-2 hidden"></p>');
+						$form.find('#donate-submit').closest('div').before('<p id="donation-uc-error" class="text-red-600 text-sm mt-2 hidden"></p>');
 					}
 					$('#donation-uc-error').text(msg).removeClass('hidden');
 				}
 			});
+	});
+
+	// Back to details
+	$('#donation-back-to-details').on('click', function () {
+		showDetailsStep();
+	});
+	// Retry after error
+	$('#donation-retry-btn').on('click', function () {
+		$('#donation-error-step').addClass('hidden');
+		showDetailsStep();
+		$('#donation-uc-error').addClass('hidden').text('');
 	});
 
 	// Preset amount and form validation (keep existing behavior)

@@ -122,3 +122,88 @@ font-size: 16px !important;
   margin-bottom: 10px !important;
   margin-top: 10px !important;
 }
+
+/* Donation form: skeleton / shimmer */
+@keyframes donation-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.donation-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgb(243 244 246) 0%,
+    rgb(229 231 235) 20%,
+    rgb(243 244 246) 40%,
+    rgb(243 244 246) 100%
+  );
+  background-size: 200% 100%;
+  animation: donation-shimmer 1.2s ease-in-out infinite;
+  border-radius: 0.75rem;
+}
+.donation-form-step {
+  transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+}
+.donation-form-step.donation-step-hidden {
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  transform: translateY(-4px);
+}
+.donation-form-step.donation-step-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+/* Button loading spinner */
+.donate-btn-spinner {
+  display: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: donation-spin 0.7s linear infinite;
+}
+#donate-submit.is-loading .donate-btn-spinner {
+  display: inline-block;
+}
+#donate-submit.is-loading .donate-btn-text {
+  opacity: 0.9;
+}
+@keyframes donation-spin {
+  to { transform: rotate(360deg); }
+}
+/* Success checkmark animation */
+@keyframes donation-checkmark {
+  0% { stroke-dashoffset: 48; opacity: 0; }
+  50% { opacity: 1; }
+  100% { stroke-dashoffset: 0; }
+}
+.donation-success-check {
+  stroke-dasharray: 48;
+  stroke-dashoffset: 48;
+  animation: donation-checkmark 0.5s ease-out forwards;
+}
+
+/* Progress stepper */
+.donation-progress-dot {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: #e5e7eb;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+.donation-progress-num {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #6b7280;
+  transition: color 0.2s ease;
+}
+.donation-progress-dot.active .donation-progress-num {
+  color: #fff;
+}
+.donation-progress-dot.active {
+  background: #171717;
+}
+.donation-progress-line.completed {
+  background: #171717;
+}

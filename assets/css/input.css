@@ -1,0 +1,124 @@
+/* input.css */
+@import "tailwindcss";
+
+
+html{
+  scroll-behavior: smooth;  
+}
+@keyframes marquee {
+  from { background-position: 0 0; }
+  to { background-position: -50% 0; }
+}
+.animate-marquee {
+  animation: marquee 20s linear infinite;
+}
+
+.button-kenya, .forminator-button {
+  padding: 1em 3em;
+  font-weight: 900 !important;
+  border: none;
+  outline: none;
+  color: white;
+  background: black;
+  cursor: pointer;
+  position: relative;
+  z-index: 0;
+  border-radius: 10px;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+.button-kenya:before, .forminator-button:before {
+  content: "";
+  background: linear-gradient( 45deg, #ff0000,  #ffffff,  #008000,  #000000,  #ff0000,  #ffffff,  #008000,  #000000  );
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  background-size: 400%;
+  z-index: -1;
+  filter: blur(5px);
+  -webkit-filter: blur(5px);
+  width: calc(100% + 4px);
+  height: calc(100% + 4px);
+  animation: glowing-button-kenya 20s linear infinite;
+  transition: opacity 0.3s ease-in-out;
+  border-radius: 10px;
+}
+@keyframes glowing-button-kenya {
+  0% {
+    background-position: 0 0;
+  }
+  50% {
+    background-position: 400% 0;
+  }
+  100% {
+    background-position: 0 0;
+  }
+}
+.button-kenya:after, .forminator-button:after {
+  z-index: -1;
+  content: "";
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background: black;
+  left: 0;
+  top: 0;
+  border-radius: 10px;
+}
+
+[x-cloak] {
+        display: none !important;
+}
+
+label{
+    font-weight: 900 !important;
+font-size: 16px !important;
+}
+.forminator-input, .forminator-select {
+  border-radius: 10px !important;
+}
+
+.prose p, .prose ul, .prose ol{
+  font-size: 14px !important;
+}
+.prose p{
+  font-size: 14px !important;
+  margin-bottom: 20px !important;
+  margin-top: 10px !important;
+}
+
+.prose ul{
+  list-style-type: disc !important; 
+  padding-left: 20px !important;
+  margin-bottom: 10px !important;
+  margin-top: 10px !important;
+}
+.prose ol{
+  list-style-type: decimal !important;
+  padding-left: 20px !important;
+  margin-bottom: 10px !important;
+  margin-top: 10px !important;
+}
+.prose li{
+  margin-bottom: 10px !important;
+}
+.prose a{
+  color: #0f6041 !important;
+  text-decoration: underline !important;
+}
+.prose b{
+  font-weight: 700 !important;
+  margin-bottom: 10px !important;
+  margin-top: 10px !important;
+}
+.prose i{
+  font-style: italic !important;
+  margin-bottom: 10px !important;
+  margin-top: 10px !important;
+}
+.prose strong{
+  font-weight: 900 !important;
+  margin-bottom: 10px !important;
+  margin-top: 10px !important;
+}

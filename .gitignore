@@ -1,0 +1,221 @@
+# WordPress Theme .gitignore
+
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Build outputs
+assets/css/output.css
+assets/css/output.min.css
+dist/
+build/
+
+# Development files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+.classpath
+
+# Logs
+*.log
+logs/
+error_log
+debug.log
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# Dependency directories
+jspm_packages/
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# dotenv environment variables file
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# WordPress specific
+wp-config.php
+wp-content/uploads/
+wp-content/cache/
+wp-content/backup-db/
+wp-content/advanced-cache.php
+wp-content/wp-cache-config.php
+
+# WordPress core files (if accidentally included)
+wp-admin/
+wp-includes/
+wp-*.php
+xmlrpc.php
+readme.html
+license.txt
+
+# Plugin and theme development
+*.pot
+*.po
+*.mo
+languages/*.po
+languages/*.mo
+
+# Sass/SCSS
+.sass-cache/
+*.css.map
+*.scss.map
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Compressed files
+*.zip
+*.tar.gz
+*.rar
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# Mac
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Local development
+local-config.php
+wp-config-local.php
+.env.local
+
+# Database dumps
+*.sql
+*.sql.gz
+
+# Theme specific
+# Uncomment if you want to ignore compiled CSS
+# assets/css/output.css
+
+# But keep the source files
+!assets/css/input.css
+!assets/css/aos.css
+!assets/css/owl.carousel.min.css
+!assets/css/owl.theme.default.min.css
+
+# Keep important assets
+!assets/fonts/
+!assets/icons/
+!assets/js/
+
+# Keep PHP files
+!*.php
+!inc/
+!components/
+!pages/
+!template-parts/
+
+# Keep configuration files
+!tailwind.config.js
+!postcss.config.mjs
+!package.json
+!composer.json
+!phpcs.xml.dist
+
+# Keep documentation
+!README.md
+!readme.txt
+!LICENSE
+
+# Keep screenshots and assets
+!screenshot.png
+!style.css
+!style-rtl.css
+!woocommerce.css

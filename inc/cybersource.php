@@ -203,32 +203,86 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 		);
 	}
 
-	// Response is the raw JWT string (or JSON with token).
+	// Response is the raw JWT string (or JSON with token and/or data).
 	$capture_context_jwt = trim( $body_response );
+	$client_library = '';
+	$client_library_integrity = '';
+
 	if ( strpos( $capture_context_jwt, '{' ) === 0 ) {
 		$json = json_decode( $body_response, true );
-		$capture_context_jwt = isset( $json['captureContext'] ) ? $json['captureContext'] : ( isset( $json['token'] ) ? $json['token'] : '' );
+		if ( is_array( $json ) ) {
+			$capture_context_jwt = '';
+			foreach ( array( 'captureContext', 'capture_context', 'token', 'jwt' ) as $key ) {
+				if ( ! empty( $json[ $key ] ) && is_string( $json[ $key ] ) ) {
+					$capture_context_jwt = trim( $json[ $key ] );
+					break;
+				}
+			}
+			if ( empty( $capture_context_jwt ) && ! empty( $json['data']['captureContext'] ) && is_string( $json['data']['captureContext'] ) ) {
+				$capture_context_jwt = trim( $json['data']['captureContext'] );
+			}
+			// Some responses include clientLibrary in the JSON body.
+			if ( ! empty( $json['data']['clientLibrary'] ) ) {
+				$client_library = $json['data']['clientLibrary'];
+			}
+			if ( ! empty( $json['data']['clientLibraryIntegrity'] ) ) {
+				$client_library_integrity = $json['data']['clientLibraryIntegrity'];
+			}
+		}
 	}
 
-	if ( empty( $capture_context_jwt ) ) {
-		return array( 'success' => false, 'error' => 'Empty capture context response.' );
+	// Ensure we have a valid-looking JWT (header.payload.signature).
+	if ( empty( $capture_context_jwt ) || count( explode( '.', $capture_context_jwt ) ) !== 3 ) {
+		return array( 'success' => false, 'error' => 'Empty or invalid capture context response.' );
 	}
 
 	// Decode JWT payload (middle part) to get clientLibrary and clientLibraryIntegrity.
 	$parts = explode( '.', $capture_context_jwt );
-	$client_library = '';
-	$client_library_integrity = '';
 	if ( count( $parts ) >= 2 ) {
 		$payload_b64 = $parts[1];
 		$payload_b64 = strtr( $payload_b64, '-_', '+/' );
 		$payload_json = base64_decode( $payload_b64, true );
 		if ( $payload_json ) {
 			$payload_decoded = json_decode( $payload_json, true );
-			if ( isset( $payload_decoded['data']['clientLibrary'] ) ) {
-				$client_library = $payload_decoded['data']['clientLibrary'];
+			if ( ! is_array( $payload_decoded ) ) {
+				$payload_decoded = array();
 			}
-			if ( isset( $payload_decoded['data']['clientLibraryIntegrity'] ) ) {
-				$client_library_integrity = $payload_decoded['data']['clientLibraryIntegrity'];
+			// Try multiple possible paths used by CyberSource in the JWT payload.
+			$paths = array(
+				array( 'data', 'clientLibrary' ),
+				array( 'ctx', 0, 'data', 'clientLibrary' ),
+				array( 'flx', 'data', 'clientLibrary' ),
+			);
+			foreach ( $paths as $path ) {
+				$val = $payload_decoded;
+				foreach ( $path as $key ) {
+					$val = isset( $val[ $key ] ) ? $val[ $key ] : null;
+					if ( $val === null ) {
+						break;
+					}
+				}
+				if ( ! empty( $val ) && is_string( $val ) ) {
+					$client_library = $val;
+					break;
+				}
+			}
+			$paths_integrity = array(
+				array( 'data', 'clientLibraryIntegrity' ),
+				array( 'ctx', 0, 'data', 'clientLibraryIntegrity' ),
+				array( 'flx', 'data', 'clientLibraryIntegrity' ),
+			);
+			foreach ( $paths_integrity as $path ) {
+				$val = $payload_decoded;
+				foreach ( $path as $key ) {
+					$val = isset( $val[ $key ] ) ? $val[ $key ] : null;
+					if ( $val === null ) {
+						break;
+					}
+				}
+				if ( ! empty( $val ) && is_string( $val ) ) {
+					$client_library_integrity = $val;
+					break;
+				}
 			}
 		}
 	}

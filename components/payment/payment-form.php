@@ -132,8 +132,11 @@
     <!-- Step 2: CyberSource payment widget (shown after "Proceed to payment") -->
     <div id="donation-payment-step" class="hidden space-y-6">
         <p class="text-sm text-neutral-600">Complete your donation with card or digital wallet.</p>
-        <div id="uc-button-list" class="min-h-[80px] rounded-lg border border-neutral-200 bg-neutral-50/50 p-4"></div>
-        <div id="cybersource-container" class="min-h-[280px] rounded-lg border border-neutral-200 bg-white"></div>
+        <p class="text-neutral-500 text-sm hidden" id="uc-loading-message">Loading payment options…</p>
+        <div id="donation-payment-error" class="hidden rounded-lg border border-red-200 bg-red-50 p-4 text-red-800 text-sm"></div>
+        <!-- Containers must be empty for CyberSource SDK to inject iframes -->
+        <div id="buttonPaymentListContainer" class="min-h-[80px] rounded-lg border border-neutral-200 bg-neutral-50/50 p-4"></div>
+        <div id="embeddedPaymentContainer" class="min-h-[280px] rounded-lg border border-neutral-200 bg-white"></div>
     </div>
 
     <!-- Step 3: Success -->

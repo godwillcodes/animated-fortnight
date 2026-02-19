@@ -8,9 +8,9 @@ yarn-error.log*
 package-lock.json
 yarn.lock
 
-# Build outputs
-assets/css/output.css
-assets/css/output.min.css
+# Build outputs (uncomment to ignore compiled CSS and require build on deploy)
+# assets/css/output.css
+# assets/css/output.min.css
 dist/
 build/
 

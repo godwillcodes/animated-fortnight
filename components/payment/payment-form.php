@@ -47,7 +47,7 @@
         <!-- Your details -->
         <div>
             <h3 class="text-sm font-semibold text-neutral-800 tracking-tight mb-4">Your details</h3>
-            <div class="space-y-4">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div>
                     <label for="name" class="block text-sm font-medium text-neutral-700 mb-1.5">Full name</label>
                     <input type="text" id="name" name="name" autocomplete="name" placeholder="John Doe"
@@ -78,7 +78,7 @@
                     <input type="text" id="billing-address2" name="billing_address2" autocomplete="street-address-line2" placeholder="Apartment, suite, etc."
                         class="input-field w-full rounded-xl border-2 border-neutral-200 bg-white px-4 py-3.5 text-neutral-900 placeholder:text-neutral-400 transition-all duration-200 focus:outline-none focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900/20" />
                 </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     <div>
                         <label for="billing-city" class="block text-sm font-medium text-neutral-700 mb-1.5">City</label>
                         <input type="text" id="billing-city" name="billing_city" autocomplete="address-level2" placeholder="City"
@@ -91,27 +91,25 @@
                             class="input-field w-full rounded-xl border-2 border-neutral-200 bg-white px-4 py-3.5 text-neutral-900 placeholder:text-neutral-400 transition-all duration-200 focus:outline-none focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900/20"
                             required />
                     </div>
-                </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                         <label for="billing-postal" class="block text-sm font-medium text-neutral-700 mb-1.5">Postal code</label>
                         <input type="text" id="billing-postal" name="billing_postal" autocomplete="postal-code" placeholder="ZIP / Postal code"
                             class="input-field w-full rounded-xl border-2 border-neutral-200 bg-white px-4 py-3.5 text-neutral-900 placeholder:text-neutral-400 transition-all duration-200 focus:outline-none focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900/20"
                             required />
                     </div>
-                    <div>
-                        <label for="billing-country" class="block text-sm font-medium text-neutral-700 mb-1.5">Country</label>
-                        <select id="billing-country" name="billing_country" autocomplete="country-name"
-                            class="input-field w-full rounded-xl border-2 border-neutral-200 bg-white px-4 py-3.5 text-neutral-900 transition-all duration-200 focus:outline-none focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900/20"
-                            required>
-                            <option value="US">United States</option>
-                            <option value="KE">Kenya</option>
-                            <option value="GB">United Kingdom</option>
-                            <option value="CA">Canada</option>
-                            <option value="AU">Australia</option>
-                            <option value="OTHER">Other</option>
-                        </select>
-                    </div>
+                </div>
+                <div>
+                    <label for="billing-country" class="block text-sm font-medium text-neutral-700 mb-1.5">Country</label>
+                    <select id="billing-country" name="billing_country" autocomplete="country-name"
+                        class="input-field w-full rounded-xl border-2 border-neutral-200 bg-white px-4 py-3.5 text-neutral-900 transition-all duration-200 focus:outline-none focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900/20"
+                        required>
+                        <option value="US">United States</option>
+                        <option value="KE">Kenya</option>
+                        <option value="GB">United Kingdom</option>
+                        <option value="CA">Canada</option>
+                        <option value="AU">Australia</option>
+                        <option value="OTHER">Other</option>
+                    </select>
                 </div>
             </div>
         </div>

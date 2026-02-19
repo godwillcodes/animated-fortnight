@@ -40,110 +40,129 @@ get_header();
   </div>
 </div>
 
-<section class="max-w-6xl mx-auto my-24 px-6">
-  <div class="grid lg:grid-cols-2 gap-12 items-start">
+<section class="max-w-7xl mx-auto my-24 px-6 lg:px-0 space-y-16">
 
-    <!-- LEFT: Donation Form -->
+  <!-- TOP: Payment Information Cards -->
+  <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+
+    <!-- ABSA -->
     <div class="bg-white border border-neutral-200 rounded-2xl shadow-sm p-8">
-      <header class="mb-8">
-        <h2 class="text-2xl font-bold text-neutral-900">Support the Work</h2>
-        <p class="mt-2 text-neutral-600">
-          Complete the form and proceed with your preferred payment method.
-        </p>
-      </header>
+      <h3 class="text-xl font-bold text-neutral-900 flex items-center mb-6">
+        <img 
+          src="https://www.absabank.co.ke/content/dam/kenya/absa/logos/absa-logo-bg.png" 
+          alt="ABSA Bank Kenya" 
+          class="h-8 w-auto mr-3"
+        >
+        Bank Transfer (ABSA)
+      </h3>
 
-      <?php get_template_part('components/payment/payment', 'form'); ?>
-      </div>
+      <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 text-sm text-neutral-700">
 
-    <!-- RIGHT: Payment Details -->
-    <div class="space-y-8">
+<div>
+  <dt class="font-semibold text-neutral-900">Account Name</dt>
+  <dd>BONIFACE MWANGI MWANZO MPYA</dd>
+</div>
 
-      <!-- ABSA -->
-      <div class="bg-white border border-neutral-200 rounded-2xl shadow-sm p-8">
-        <h3 class="text-xl font-bold text-neutral-900 flex items-center mb-6">
-          <img 
-            src="https://www.absabank.co.ke/content/dam/kenya/absa/logos/absa-logo-bg.png" 
-            alt="ABSA Bank Kenya" 
-            class="h-8 w-auto mr-3"
-          >
-          Bank Transfer (ABSA)
-        </h3>
+<div>
+  <dt class="font-semibold text-neutral-900">Account Number</dt>
+  <dd>2053955064</dd>
+</div>
 
-        <dl class="grid sm:grid-cols-2 gap-x-8 gap-y-4 text-neutral-700 text-sm">
-          <div>
-            <dt class="font-semibold text-neutral-900">Account Name</dt>
-            <dd>BONIFACE MWANGI MWANZO MPYA</dd>
-          </div>
-          <div>
-            <dt class="font-semibold text-neutral-900">Account Number</dt>
-            <dd>2053955064</dd>
-          </div>
-          <div>
-            <dt class="font-semibold text-neutral-900">Bank Code</dt>
-            <dd>03</dd>
-          </div>
-          <div>
-            <dt class="font-semibold text-neutral-900">Branch</dt>
-            <dd>Yaya (109)</dd>
-          </div>
-          <div>
-            <dt class="font-semibold text-neutral-900">Sort Code</dt>
-            <dd>03109</dd>
-          </div>
-          <div>
-            <dt class="font-semibold text-neutral-900">SWIFT</dt>
-            <dd>BARCKENX</dd>
-          </div>
-        </dl>
-      </div>
+<div>
+  <dt class="font-semibold text-neutral-900">Bank Code</dt>
+  <dd>03</dd>
+</div>
 
-      <!-- MPESA -->
-      <div class="bg-emerald-50 border border-emerald-200 rounded-2xl shadow-sm p-8">
-        <h3 class="text-xl font-bold text-emerald-800 flex items-center mb-6">
-          <img 
-            src="https://www.m-pesa.africa/images/mpesa-logo.png" 
-            alt="M-PESA Kenya" 
-            class="h-8 w-auto mr-3"
-          >
-          M-PESA (Buy Goods)
-        </h3>
+<div>
+  <dt class="font-semibold text-neutral-900">Branch</dt>
+  <dd>Yaya (109)</dd>
+</div>
 
-        <dl class="space-y-4 text-sm text-neutral-800">
-          <div>
-            <dt class="font-semibold">Till Number</dt>
-            <dd>5010215</dd>
-          </div>
-          <div>
-            <dt class="font-semibold">Send Money</dt>
-            <dd>Boniface Mwangi — 0792788638</dd>
-          </div>
-        </dl>
+<div>
+  <dt class="font-semibold text-neutral-900">Sort Code</dt>
+  <dd>03109</dd>
+</div>
 
-        <p class="mt-6 text-xs text-neutral-600">
-          Compatible with international remittance platforms supporting Kenyan mobile transfers.
-        </p>
-      </div>
+<div>
+  <dt class="font-semibold text-neutral-900">SWIFT</dt>
+  <dd>BARCKENX</dd>
+</div>
 
-      <!-- Contact -->
-      <div class="text-sm text-neutral-600">
+</dl>
+
+    </div>
+
+    <!-- MPESA -->
+    <div class="bg-emerald-50 border border-emerald-200 rounded-2xl shadow-sm p-8">
+      <h3 class="text-xl font-bold text-emerald-800 flex items-center mb-6">
+        <img 
+          src="https://www.m-pesa.africa/images/mpesa-logo.png" 
+          alt="M-PESA Kenya" 
+          class="h-8 w-auto mr-3"
+        >
+        M-PESA (Buy Goods)
+      </h3>
+
+      <dl class="space-y-4 text-sm text-neutral-800">
+        <div>
+          <dt class="font-semibold">Till Number</dt>
+          <dd>5010215</dd>
+        </div>
+        <div>
+          <dt class="font-semibold">Send Money</dt>
+          <dd>Boniface Mwangi — 0792788638</dd>
+        </div>
+      </dl>
+
+      <p class="mt-6 text-xs text-neutral-600">
+        Compatible with international remittance platforms supporting Kenyan mobile transfers.
+      </p>
+    </div>
+
+    <!-- Contact -->
+    <div class="bg-white border border-neutral-200 rounded-2xl shadow-sm p-8">
+      <h3 class="text-xl font-bold text-neutral-900 mb-6">
+        Contact & Support
+      </h3>
+
+      <div class="space-y-4 text-sm text-neutral-700">
         <p>
-          Tel: <span class="font-medium text-neutral-900">+254 117 777 111</span>
+          <span class="font-semibold text-neutral-900">Tel:</span><br>
+          +254 117 777 111
         </p>
+
         <p>
+          <span class="font-semibold text-neutral-900">Email:</span><br>
           <a href="mailto:hello@bonifacemwangi.com" class="hover:underline">
             hello@bonifacemwangi.com
           </a>
         </p>
+
         <p>
+          <span class="font-semibold text-neutral-900">Website:</span><br>
           <a href="https://bonifacemwangi.com" class="text-emerald-700 font-medium hover:underline">
             bonifacemwangi.com
           </a>
         </p>
       </div>
-
     </div>
+
   </div>
+
+  <!-- BOTTOM: Full Width Donation Form -->
+  <div class="bg-white border border-neutral-200 rounded-2xl shadow-sm p-10">
+    <header class="mb-8 text-center">
+      <h2 class="text-4xl font-bold text-neutral-900">Support the Work</h2>
+      <p class="mt-3 text-lg text-neutral-600">
+        Complete the form and proceed with your preferred payment method.
+      </p>
+    </header>
+
+    <?php get_template_part('components/payment/payment', 'form'); ?>
+  </div>
+
 </section>
+
 
 
 <?php

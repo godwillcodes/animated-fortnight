@@ -100,29 +100,13 @@
 		});
 	}
 
-	function getBillingData() {
-		var country = $('#billing-country').val();
-		if (country === 'OTHER') country = 'US';
-		return {
-			address1: $('#billing-address1').val(),
-			address2: $('#billing-address2').val(),
-			locality: $('#billing-city').val(),
-			administrativeArea: $('#billing-state').val(),
-			postalCode: $('#billing-postal').val(),
-			country: country
-		};
-	}
-
 	function getCaptureContext() {
 		var amount = parseFloat($('#amount').val(), 10) || 0;
 		var name = $('#name').val();
 		var email = $('#email').val();
-		var billing = getBillingData();
+		var phone = $('#phone').val();
 		if (amount < MIN_AMOUNT) return $.Deferred().reject({ error: 'Minimum donation is $' + MIN_AMOUNT }).promise();
-		if (!name || !email) return $.Deferred().reject({ error: 'Please enter your name and email.' }).promise();
-		if (!billing.address1 || !billing.locality || !billing.administrativeArea || !billing.postalCode) {
-			return $.Deferred().reject({ error: 'Please complete the billing address.' }).promise();
-		}
+		if (!name || !email || !phone) return $.Deferred().reject({ error: 'Please enter your name, email, and phone number.' }).promise();
 
 		return $.ajax({
 			url: config.ajaxUrl,
@@ -135,19 +119,13 @@
 				origin: window.location.origin,
 				name: name,
 				email: email,
-				billing_address1: billing.address1,
-				billing_address2: billing.address2,
-				billing_locality: billing.locality,
-				billing_administrative_area: billing.administrativeArea,
-				billing_postal_code: billing.postalCode,
-				billing_country: billing.country
+				phone: phone
 			}
 		});
 	}
 
 	function processPayment(transientToken) {
 		var amount = parseFloat($('#amount').val(), 10) || 0;
-		var billing = getBillingData();
 		return $.ajax({
 			url: config.ajaxUrl,
 			type: 'POST',
@@ -160,13 +138,8 @@
 				currency: 'USD',
 				name: $('#name').val(),
 				email: $('#email').val(),
-				message: $('#message').val(),
-				billing_address1: billing.address1,
-				billing_address2: billing.address2,
-				billing_locality: billing.locality,
-				billing_administrative_area: billing.administrativeArea,
-				billing_postal_code: billing.postalCode,
-				billing_country: billing.country
+				phone: $('#phone').val(),
+				message: $('#message').val()
 			}
 		});
 	}

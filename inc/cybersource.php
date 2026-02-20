@@ -172,18 +172,6 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 		}
 	}
 
-	// Normalize administrativeArea (state) for US addresses - must be 2-letter code.
-	$country = isset( $bill_to['country'] ) ? strtoupper( trim( $bill_to['country'] ) ) : 'US';
-	if ( $country === 'US' && ! empty( $bill_to['administrativeArea'] ) ) {
-		$normalized_state = boniface_cybersource_normalize_state( $bill_to['administrativeArea'] );
-		if ( empty( $normalized_state ) ) {
-			return array( 'success' => false, 'error' => 'Invalid state code. Please use a valid 2-letter US state code (e.g., CA, NY, TX).' );
-		}
-		$bill_to['administrativeArea'] = $normalized_state;
-	} elseif ( $country === 'US' && empty( $bill_to['administrativeArea'] ) ) {
-		return array( 'success' => false, 'error' => 'State is required for US addresses.' );
-	}
-
 	$payload = array(
 		'targetOrigins'    => array( $origin ),
 		'clientVersion'    => '0.34',
@@ -208,18 +196,7 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 					'totalAmount' => $total_amount,
 					'currency'    => $currency,
 				),
-				'billTo' => array_merge( array(
-					'firstName'          => '',
-					'lastName'           => '',
-					'address1'           => '',
-					'address2'           => '',
-					'buildingNumber'     => 'N/A',
-					'locality'           => '',
-					'administrativeArea' => '',
-					'postalCode'         => '',
-					'country'            => 'US',
-					'email'              => '',
-				), $bill_to ),
+			'billTo' => $bill_to,
 			),
 			'clientReferenceInformation' => array(
 				'code' => 'donation-' . substr( uniqid( '', true ), -8 ),
@@ -356,8 +333,15 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 	$api_start = microtime( true );
 	
 	error_log( $log_prefix . '=== START PROCESS PAYMENT FUNCTION ===' );
-	error_log( $log_prefix . 'Amount: ' . $amount . ' ' . $currency );
+		error_log( $log_prefix . 'Amount: ' . $amount . ' ' . $currency );
 	error_log( $log_prefix . 'Token length: ' . strlen( $transient_token_jwt ) );
+	error_log( $log_prefix . 'Bill_to keys: ' . implode( ', ', array_keys( $bill_to ) ) );
+	error_log( $log_prefix . 'Bill_to values (sanitized): ' . json_encode( array_map( function( $v ) {
+		if ( is_string( $v ) && strlen( $v ) > 20 ) {
+			return substr( $v, 0, 10 ) . '...[REDACTED]';
+		}
+		return $v;
+	}, $bill_to ) ) );
 	
 	error_log( $log_prefix . 'Step A: Getting config...' );
 	$config = boniface_cybersource_config();
@@ -366,16 +350,14 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 		return array( 'success' => false, 'error' => 'CyberSource is not configured.' );
 	}
 	error_log( $log_prefix . 'Step A: Config loaded, merchant_id: ' . substr( $config['merchant_id'], 0, 8 ) . '...' );
-	error_log( $log_prefix . 'Step A: Environment: ' . ( isset( $config['env'] ) ? $config['env'] : 'unknown' ) );
 
 	$total_amount = number_format( (float) $amount, 2, '.', '' );
 	$resource = '/pts/v2/payments';
 	$base_url = boniface_cybersource_base_url();
-	error_log( $log_prefix . 'Step B: Base URL: ' . $base_url );
-	error_log( $log_prefix . 'Step B: Resource: ' . $resource );
-	error_log( $log_prefix . 'Step B: Total amount: ' . $total_amount );
+	error_log( $log_prefix . 'Step B: Base URL: ' . $base_url . $resource . ' amount: ' . $total_amount );
 
-	error_log( $log_prefix . 'Step C: Building payload...' );
+	error_log( $log_prefix . 'Step C: Building payload with bill_to: ' . wp_json_encode( array_keys( $bill_to ) ) );
+
 	$payload = array(
 		'clientReferenceInformation' => array(
 			'code' => 'donation-' . substr( uniqid( '', true ), -8 ),
@@ -392,32 +374,106 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 				'totalAmount' => $total_amount,
 				'currency'    => $currency,
 			),
-			'billTo' => array_merge( array(
-				'firstName'          => '',
-				'lastName'           => '',
-				'address1'           => 'N/A',
-				'address2'           => '',
-				'buildingNumber'     => 'N/A',
-				'locality'           => 'N/A',
-				'administrativeArea' => 'N/A',
-				'postalCode'         => '00000',
-				'country'             => 'US',
-				'email'              => '',
-				'phoneNumber'        => '0000000000',
-			), $bill_to ),
+			'billTo' => $bill_to,
 		),
 	);
 
+	error_log( $log_prefix . 'Step C: Analyzing transient token...' );
+	$token_parts = explode( '.', $transient_token_jwt );
+	error_log( $log_prefix . 'Step C: Token parts count: ' . count( $token_parts ) );
+	if ( count( $token_parts ) >= 2 ) {
+		$token_header_b64 = $token_parts[0];
+		$token_payload_b64 = $token_parts[1];
+		$token_header_b64_decoded = strtr( $token_header_b64, '-_', '+/' );
+		$token_payload_b64_decoded = strtr( $token_payload_b64, '-_', '+/' );
+		$token_header_json = base64_decode( $token_header_b64_decoded, true );
+		$token_payload_json = base64_decode( $token_payload_b64_decoded, true );
+		if ( $token_header_json ) {
+			$token_header = json_decode( $token_header_json, true );
+			error_log( $log_prefix . 'Step C: Token header: ' . json_encode( $token_header ) );
+		}
+		if ( $token_payload_json ) {
+			$token_payload = json_decode( $token_payload_json, true );
+			if ( is_array( $token_payload ) ) {
+				$token_iss = isset( $token_payload['iss'] ) ? $token_payload['iss'] : 'N/A';
+				$token_exp = isset( $token_payload['exp'] ) ? $token_payload['exp'] : null;
+				$token_iat = isset( $token_payload['iat'] ) ? $token_payload['iat'] : null;
+				$token_type = isset( $token_payload['type'] ) ? $token_payload['type'] : 'N/A';
+				error_log( $log_prefix . 'Step C: Token issuer: ' . $token_iss );
+				error_log( $log_prefix . 'Step C: Token type: ' . $token_type );
+				if ( $token_exp ) {
+					$now = time();
+					$token_age = $now - ( $token_iat ?: $now );
+					$token_ttl = $token_exp - $now;
+					error_log( $log_prefix . 'Step C: Token issued at: ' . date( 'Y-m-d H:i:s', $token_iat ?: $now ) );
+					error_log( $log_prefix . 'Step C: Token expires at: ' . date( 'Y-m-d H:i:s', $token_exp ) );
+					error_log( $log_prefix . 'Step C: Token age: ' . round( $token_age / 60, 2 ) . ' minutes' );
+					error_log( $log_prefix . 'Step C: Token TTL: ' . round( $token_ttl / 60, 2 ) . ' minutes' );
+					if ( $token_ttl < 0 ) {
+						error_log( $log_prefix . 'WARNING: Token is EXPIRED!' );
+					} elseif ( $token_ttl < 60 ) {
+						error_log( $log_prefix . 'WARNING: Token expires in less than 1 minute!' );
+					}
+				}
+			}
+		}
+		error_log( $log_prefix . 'Step C: Token preview: ' . substr( $transient_token_jwt, 0, 50 ) . '...' . substr( $transient_token_jwt, -50 ) );
+	} else {
+		error_log( $log_prefix . 'WARNING: Token does not appear to be a valid JWT (not 3 parts)' );
+	}
+
 	error_log( $log_prefix . 'Step C: Payload built, encoding JSON...' );
+	
+	// Validate payload structure before encoding
+	$payload_errors = array();
+	if ( empty( $payload['tokenInformation']['transientTokenJwt'] ) ) {
+		$payload_errors[] = 'Missing transientTokenJwt';
+	}
+	if ( empty( $payload['orderInformation']['amountDetails']['totalAmount'] ) ) {
+		$payload_errors[] = 'Missing totalAmount';
+	}
+	if ( empty( $payload['orderInformation']['amountDetails']['currency'] ) ) {
+		$payload_errors[] = 'Missing currency';
+	}
+	if ( ! empty( $payload_errors ) ) {
+		error_log( $log_prefix . 'ERROR: Payload validation failed: ' . implode( ', ', $payload_errors ) );
+	}
+	
 	$body = wp_json_encode( $payload );
 	$body_size = strlen( $body );
 	error_log( $log_prefix . 'Step C: Body size: ' . $body_size . ' bytes' );
 	
+	if ( json_last_error() !== JSON_ERROR_NONE ) {
+		error_log( $log_prefix . 'ERROR: JSON encode failed: ' . json_last_error_msg() );
+	}
+	
+	// Log full payload (sanitized - remove sensitive token data)
+	$payload_log = $payload;
+	if ( isset( $payload_log['tokenInformation']['transientTokenJwt'] ) ) {
+		$token_preview = substr( $payload_log['tokenInformation']['transientTokenJwt'], 0, 30 ) . '...[REDACTED]...' . substr( $payload_log['tokenInformation']['transientTokenJwt'], -30 );
+		$payload_log['tokenInformation']['transientTokenJwt'] = $token_preview;
+	}
+	error_log( $log_prefix . 'Step C: Full payload (sanitized): ' . json_encode( $payload_log, JSON_PRETTY_PRINT ) );
+	
+	// Log actual request body structure (first 500 chars)
+	error_log( $log_prefix . 'Step C: Request body preview (first 500 chars): ' . substr( $body, 0, 500 ) );
+	
 	error_log( $log_prefix . 'Step D: Generating signature headers...' );
 	$headers = boniface_cybersource_signature_headers( 'POST', $resource, $body );
 	error_log( $log_prefix . 'Step D: Headers generated, count: ' . count( $headers ) );
+	
+	// Log headers (sanitized - no shared secret)
+	$headers_log = $headers;
+	if ( isset( $headers_log['Signature'] ) ) {
+		$sig_preview = substr( $headers_log['Signature'], 0, 50 ) . '...[REDACTED]';
+		$headers_log['Signature'] = $sig_preview;
+	}
+	error_log( $log_prefix . 'Step D: Request headers (sanitized): ' . json_encode( $headers_log, JSON_PRETTY_PRINT ) );
 	if ( isset( $headers['v-c-merchant-id'] ) ) {
-		error_log( $log_prefix . 'Step D: Merchant ID in headers: ' . substr( $headers['v-c-merchant-id'], 0, 8 ) . '...' );
+		error_log( $log_prefix . 'Step D: Merchant ID in headers: ' . $headers['v-c-merchant-id'] );
+	}
+	if ( isset( $headers['v-c-date'] ) ) {
+		error_log( $log_prefix . 'Step D: v-c-date: ' . $headers['v-c-date'] );
 	}
 
 	$request_url = $base_url . $resource;
@@ -445,6 +501,19 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 	
 	error_log( $log_prefix . 'Step F: Response code: ' . ( $code ? $code : 'NULL' ) );
 	error_log( $log_prefix . 'Step F: Response body size: ' . $response_size . ' bytes' );
+	
+	// Log response headers for debugging
+	$response_headers = wp_remote_retrieve_headers( $response );
+	if ( $response_headers ) {
+		$response_headers_array = $response_headers->getAll();
+		error_log( $log_prefix . 'Step F: Response headers: ' . json_encode( $response_headers_array ) );
+		if ( isset( $response_headers_array['x-request-id'] ) ) {
+			error_log( $log_prefix . 'Step F: CyberSource Request ID: ' . $response_headers_array['x-request-id'] );
+		}
+		if ( isset( $response_headers_array['v-c-correlation-id'] ) ) {
+			error_log( $log_prefix . 'Step F: CyberSource Correlation ID: ' . $response_headers_array['v-c-correlation-id'] );
+		}
+	}
 	
 	if ( is_wp_error( $response ) ) {
 		$msg = $response->get_error_message();
@@ -475,34 +544,93 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 		error_log( $log_prefix . 'ERROR: Response body: ' . substr( $body_response, 0, 500 ) );
 	}
 	
-	$reason_code = isset( $data['errorInformation']['reasonCode'] ) ? $data['errorInformation']['reasonCode'] : '';
-	$message = isset( $data['errorInformation']['message'] ) ? $data['errorInformation']['message'] : '';
+	// Check for success: HTTP 2xx AND status field is not an error status
+	$status = isset( $data['status'] ) ? $data['status'] : '';
+	$is_success = ( $code >= 200 && $code < 300 ) && ( empty( $status ) || $status === 'AUTHORIZED' || $status === 'CAPTURED' || $status === 'PENDING' );
 	
-	if ( $code >= 200 && $code < 300 ) {
+	if ( $is_success ) {
 		$id = isset( $data['id'] ) ? $data['id'] : '';
 		$api_duration = microtime( true ) - $api_start;
 		error_log( $log_prefix . 'SUCCESS: Payment processed' );
 		error_log( $log_prefix . 'SUCCESS: Payment ID: ' . $id );
+		error_log( $log_prefix . 'SUCCESS: Status: ' . $status );
 		error_log( $log_prefix . 'SUCCESS: Total function time: ' . round( $api_duration * 1000, 2 ) . ' ms' );
 		error_log( $log_prefix . '=== END PROCESS PAYMENT FUNCTION (SUCCESS) ===' );
 		return array( 'success' => true, 'id' => $id );
 	}
 
+	// Extract error message from multiple possible response structures
+	$reason_code = '';
+	$message = '';
+	
+	// Structure 1: errorInformation.reasonCode / errorInformation.message (standard)
+	if ( isset( $data['errorInformation']['reasonCode'] ) ) {
+		$reason_code = $data['errorInformation']['reasonCode'];
+	}
+	if ( isset( $data['errorInformation']['message'] ) ) {
+		$message = $data['errorInformation']['message'];
+	}
+	
+	// Structure 2: Direct reason / message fields (e.g. SYSTEM_ERROR responses)
+	if ( empty( $reason_code ) && isset( $data['reason'] ) ) {
+		$reason_code = $data['reason'];
+	}
+	if ( empty( $message ) && isset( $data['message'] ) ) {
+		$message = $data['message'];
+	}
+	
+	// Structure 3: status field indicates error
+	if ( ! empty( $status ) && ( $status === 'SERVER_ERROR' || $status === 'DECLINED' || $status === 'INVALID_REQUEST' ) ) {
+		if ( empty( $message ) ) {
+			$message = 'Payment ' . strtolower( str_replace( '_', ' ', $status ) );
+		}
+	}
+
 	$api_duration = microtime( true ) - $api_start;
 	error_log( $log_prefix . 'ERROR: Payment failed' );
 	error_log( $log_prefix . 'ERROR: HTTP code: ' . $code );
+	error_log( $log_prefix . 'ERROR: Status: ' . ( $status ? $status : 'N/A' ) );
 	error_log( $log_prefix . 'ERROR: Reason code: ' . ( $reason_code ? $reason_code : 'N/A' ) );
 	error_log( $log_prefix . 'ERROR: Message: ' . ( $message ? $message : 'N/A' ) );
 	if ( isset( $data['errorInformation']['details'] ) ) {
 		error_log( $log_prefix . 'ERROR: Details: ' . json_encode( $data['errorInformation']['details'] ) );
 	}
+	if ( isset( $data['details'] ) ) {
+		error_log( $log_prefix . 'ERROR: Details (direct): ' . json_encode( $data['details'] ) );
+	}
+	error_log( $log_prefix . 'ERROR: Full response: ' . json_encode( $data ) );
+	
+	// Additional debugging for SYSTEM_ERROR
+	if ( $reason_code === 'SYSTEM_ERROR' || $status === 'SERVER_ERROR' ) {
+		error_log( $log_prefix . 'DEBUG: SYSTEM_ERROR detected - checking possible causes...' );
+		error_log( $log_prefix . 'DEBUG: HTTP status code: ' . $code );
+		error_log( $log_prefix . 'DEBUG: Response has id field: ' . ( isset( $data['id'] ) ? 'yes (' . $data['id'] . ')' : 'no' ) );
+		error_log( $log_prefix . 'DEBUG: Response has submitTimeUtc: ' . ( isset( $data['submitTimeUtc'] ) ? $data['submitTimeUtc'] : 'no' ) );
+		if ( isset( $data['id'] ) ) {
+			error_log( $log_prefix . 'DEBUG: CyberSource accepted the request (has ID) but returned SYSTEM_ERROR - likely account/config issue' );
+		} else {
+			error_log( $log_prefix . 'DEBUG: CyberSource rejected request before processing (no ID) - likely request format issue' );
+		}
+	}
+	
 	error_log( $log_prefix . 'ERROR: Total function time: ' . round( $api_duration * 1000, 2 ) . ' ms' );
 	error_log( $log_prefix . '=== END PROCESS PAYMENT FUNCTION (FAILED) ===' );
 	
+	// Build user-friendly error message
+	$error_msg = $message;
+	if ( empty( $error_msg ) ) {
+		$error_msg = 'Payment could not be processed';
+		if ( $reason_code ) {
+			$error_msg .= ' (' . $reason_code . ')';
+		} elseif ( $code ) {
+			$error_msg .= ' (HTTP ' . $code . ')';
+		}
+	}
+	
 	return array(
 		'success'     => false,
-		'error'       => $message ?: ( 'Payment failed (' . $code . ')' ),
-		'reason_code' => $reason_code,
+		'error'       => $error_msg,
+		'reason_code' => $reason_code ?: ( $status ?: (string) $code ),
 	);
 }
 
@@ -517,26 +645,23 @@ function boniface_cybersource_ajax_capture_context() {
 	$origin   = isset( $_POST['origin'] ) ? esc_url_raw( wp_unslash( $_POST['origin'] ) ) : '';
 	$name     = isset( $_POST['name'] ) ? sanitize_text_field( wp_unslash( $_POST['name'] ) ) : '';
 	$email    = isset( $_POST['email'] ) ? sanitize_email( wp_unslash( $_POST['email'] ) ) : '';
+	$phone    = isset( $_POST['phone'] ) ? sanitize_text_field( wp_unslash( $_POST['phone'] ) ) : '';
 
-	$bill_to = array();
+	$bill_to = array(
+		'firstName'          => 'Donor',
+		'lastName'           => 'Donor',
+		'email'              => $email ?: 'donor@example.com',
+		'address1'           => '1 Market St',
+		'locality'           => 'San Francisco',
+		'administrativeArea' => 'CA',
+		'postalCode'         => '94105',
+		'country'            => 'US',
+	);
 	if ( $name ) {
 		$parts = preg_split( '/\s+/', trim( $name ), 2 );
 		$bill_to['firstName'] = $parts[0];
-		$bill_to['lastName']  = isset( $parts[1] ) ? $parts[1] : '';
+		$bill_to['lastName']  = isset( $parts[1] ) ? $parts[1] : $parts[0];
 	}
-	if ( $email ) {
-		$bill_to['email'] = $email;
-	}
-	$bill_to['address1']           = isset( $_POST['billing_address1'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_address1'] ) ) : '';
-	$bill_to['address2']           = isset( $_POST['billing_address2'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_address2'] ) ) : '';
-	$bill_to['locality']           = isset( $_POST['billing_locality'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_locality'] ) ) : '';
-	$bill_to['administrativeArea'] = isset( $_POST['billing_administrative_area'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_administrative_area'] ) ) : '';
-	$bill_to['postalCode']         = isset( $_POST['billing_postal_code'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_postal_code'] ) ) : '';
-	$country                       = isset( $_POST['billing_country'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_country'] ) ) : 'US';
-	if ( $country === 'OTHER' ) {
-		$country = 'US';
-	}
-	$bill_to['country'] = $country;
 
 	$result = boniface_cybersource_get_capture_context( $amount, $currency, $origin, $bill_to );
 	wp_send_json( $result );
@@ -577,32 +702,50 @@ function boniface_cybersource_ajax_process_payment() {
 		$email   = isset( $_POST['email'] ) ? sanitize_email( wp_unslash( $_POST['email'] ) ) : '';
 		
 		error_log( $log_prefix . 'Token length: ' . strlen( $token ) );
+		error_log( $log_prefix . 'Token preview (first 50): ' . substr( $token, 0, 50 ) );
+		error_log( $log_prefix . 'Token preview (last 50): ' . substr( $token, -50 ) );
 		error_log( $log_prefix . 'Amount: ' . $amount );
 		error_log( $log_prefix . 'Currency: ' . $currency );
+		error_log( $log_prefix . 'Name: ' . substr( $name, 0, 30 ) );
+		error_log( $log_prefix . 'Email: ' . substr( $email, 0, 30 ) );
+		
+		// Quick token validation
+		if ( $token ) {
+			$token_parts_check = explode( '.', $token );
+			error_log( $log_prefix . 'Token JWT parts: ' . count( $token_parts_check ) );
+			if ( count( $token_parts_check ) !== 3 ) {
+				error_log( $log_prefix . 'WARNING: Token does not have 3 JWT parts!' );
+			}
+		}
 
 		if ( ! $token || $amount < 10 ) {
 			error_log( $log_prefix . 'ERROR: Invalid request - token: ' . ( $token ? 'present' : 'missing' ) . ', amount: ' . $amount );
 			wp_send_json( array( 'success' => false, 'error' => 'Invalid request.' ) );
 		}
 
-	$bill_to = array( 'email' => $email );
-	if ( $name ) {
-		$parts = preg_split( '/\s+/', trim( $name ), 2 );
-		$bill_to['firstName'] = $parts[0];
-		$bill_to['lastName']  = isset( $parts[1] ) ? $parts[1] : '';
-	}
-		error_log( $log_prefix . 'Step 3: Building bill_to array...' );
-		$bill_to['address1']           = isset( $_POST['billing_address1'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_address1'] ) ) : '';
-		$bill_to['address2']           = isset( $_POST['billing_address2'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_address2'] ) ) : '';
-		$bill_to['locality']           = isset( $_POST['billing_locality'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_locality'] ) ) : '';
-		$bill_to['administrativeArea'] = isset( $_POST['billing_administrative_area'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_administrative_area'] ) ) : '';
-		$bill_to['postalCode']         = isset( $_POST['billing_postal_code'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_postal_code'] ) ) : '';
-		$country                       = isset( $_POST['billing_country'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_country'] ) ) : 'US';
-		if ( $country === 'OTHER' ) {
-			$country = 'US';
+		$phone = isset( $_POST['phone'] ) ? sanitize_text_field( wp_unslash( $_POST['phone'] ) ) : '';
+
+		error_log( $log_prefix . 'Step 3: Building bill_to array with safe defaults...' );
+		$bill_to = array(
+			'firstName'          => 'Donor',
+			'lastName'           => 'Donor',
+			'email'              => $email ?: 'donor@example.com',
+			'phoneNumber'        => $phone,
+			'address1'           => '1 Market St',
+			'locality'           => 'San Francisco',
+			'administrativeArea' => 'CA',
+			'postalCode'         => '94105',
+			'country'            => 'US',
+		);
+		if ( $name ) {
+			$parts = preg_split( '/\s+/', trim( $name ), 2 );
+			$bill_to['firstName'] = $parts[0];
+			$bill_to['lastName']  = isset( $parts[1] ) ? $parts[1] : $parts[0];
 		}
-		$bill_to['country'] = $country;
-		error_log( $log_prefix . 'Bill_to prepared: ' . json_encode( array_keys( $bill_to ) ) );
+		if ( empty( $phone ) ) {
+			unset( $bill_to['phoneNumber'] );
+		}
+		error_log( $log_prefix . 'Bill_to prepared: ' . wp_json_encode( array_keys( $bill_to ) ) );
 
 		$before_process = microtime( true );
 		error_log( $log_prefix . 'Step 4: Calling boniface_cybersource_process_payment...' );
@@ -624,20 +767,13 @@ function boniface_cybersource_ajax_process_payment() {
 			error_log( $log_prefix . 'Step 5: Payment successful, firing action hook...' );
 			// Optional: save donation record (e.g. custom post type or table).
 			do_action( 'boniface_donation_payment_success', array(
-				'amount'    => $amount,
-				'currency'  => $currency,
-				'name'      => $name,
-				'email'     => $email,
-				'message'   => isset( $_POST['message'] ) ? sanitize_textarea_field( wp_unslash( $_POST['message'] ) ) : '',
+				'amount'     => $amount,
+				'currency'   => $currency,
+				'name'       => $name,
+				'email'      => $email,
+				'phone'      => $phone,
+				'message'    => isset( $_POST['message'] ) ? sanitize_textarea_field( wp_unslash( $_POST['message'] ) ) : '',
 				'payment_id' => isset( $result['id'] ) ? $result['id'] : '',
-				'billing'   => array(
-					'address1' => $bill_to['address1'] ?? '',
-					'address2' => $bill_to['address2'] ?? '',
-					'locality' => $bill_to['locality'] ?? '',
-					'administrativeArea' => $bill_to['administrativeArea'] ?? '',
-					'postalCode' => $bill_to['postalCode'] ?? '',
-					'country'   => $bill_to['country'] ?? 'US',
-				),
 			) );
 			error_log( $log_prefix . 'Step 5: Action hook completed' );
 		}

@@ -205,6 +205,10 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 	);
 
 	$body = wp_json_encode( $payload );
+	$has_building = ( strpos( $body, 'buildingNumber' ) !== false );
+	error_log( '[CYBERSOURCE_CAPTURE_CTX] OUTGOING BODY CONTAINS buildingNumber: ' . ( $has_building ? 'YES - THIS IS THE BUG' : 'NO - clean' ) );
+	error_log( '[CYBERSOURCE_CAPTURE_CTX] FULL OUTGOING BODY: ' . $body );
+	error_log( '[CYBERSOURCE_CAPTURE_CTX] Request URL: ' . $base_url . $resource );
 	$headers = boniface_cybersource_signature_headers( 'POST', $resource, $body );
 
 	$response = wp_remote_post( $base_url . $resource, array(
@@ -215,6 +219,8 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 
 	$code = wp_remote_retrieve_response_code( $response );
 	$body_response = wp_remote_retrieve_body( $response );
+	error_log( '[CYBERSOURCE_CAPTURE_CTX] Response code: ' . $code );
+	error_log( '[CYBERSOURCE_CAPTURE_CTX] Response body: ' . substr( $body_response, 0, 500 ) );
 
 	if ( is_wp_error( $response ) ) {
 		return array( 'success' => false, 'error' => $response->get_error_message() );
@@ -477,6 +483,7 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 	}
 
 	$request_url = $base_url . $resource;
+	error_log( $log_prefix . 'Step E: OUTGOING REQUEST BODY: ' . $body );
 	error_log( $log_prefix . 'Step E: Making wp_remote_post request...' );
 	error_log( $log_prefix . 'Step E: URL: ' . $request_url );
 	error_log( $log_prefix . 'Step E: Timeout: 60 seconds' );
@@ -638,6 +645,14 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
  * AJAX: Get capture context for Unified Checkout.
  */
 function boniface_cybersource_ajax_capture_context() {
+	$_cs_version = 'v2-2026-02-21-no-buildingNumber';
+	error_log( '[CYBERSOURCE_CAPTURE_CTX] === CAPTURE CONTEXT START ===' );
+	error_log( '[CYBERSOURCE_CAPTURE_CTX] CODE VERSION: ' . $_cs_version );
+	error_log( '[CYBERSOURCE_CAPTURE_CTX] FILE: ' . __FILE__ );
+	error_log( '[CYBERSOURCE_CAPTURE_CTX] FILE MODIFIED: ' . date( 'Y-m-d H:i:s', filemtime( __FILE__ ) ) );
+	error_log( '[CYBERSOURCE_CAPTURE_CTX] FILE SIZE: ' . filesize( __FILE__ ) . ' bytes' );
+	error_log( '[CYBERSOURCE_CAPTURE_CTX] FILE MD5: ' . md5_file( __FILE__ ) );
+
 	check_ajax_referer( 'boniface_cybersource', 'nonce' );
 
 	$amount   = isset( $_POST['amount'] ) ? floatval( $_POST['amount'] ) : 0;
@@ -663,7 +678,18 @@ function boniface_cybersource_ajax_capture_context() {
 		$bill_to['lastName']  = isset( $parts[1] ) ? $parts[1] : $parts[0];
 	}
 
+	error_log( '[CYBERSOURCE_CAPTURE_CTX] bill_to keys: ' . wp_json_encode( array_keys( $bill_to ) ) );
+	error_log( '[CYBERSOURCE_CAPTURE_CTX] bill_to values: ' . wp_json_encode( $bill_to ) );
+	error_log( '[CYBERSOURCE_CAPTURE_CTX] has buildingNumber key: ' . ( array_key_exists( 'buildingNumber', $bill_to ) ? 'YES - BUG!' : 'NO - correct' ) );
+
 	$result = boniface_cybersource_get_capture_context( $amount, $currency, $origin, $bill_to );
+
+	error_log( '[CYBERSOURCE_CAPTURE_CTX] Result success: ' . ( $result['success'] ? 'true' : 'false' ) );
+	if ( ! $result['success'] ) {
+		error_log( '[CYBERSOURCE_CAPTURE_CTX] Result error: ' . ( isset( $result['error'] ) ? $result['error'] : 'N/A' ) );
+	}
+	error_log( '[CYBERSOURCE_CAPTURE_CTX] === CAPTURE CONTEXT END ===' );
+
 	wp_send_json( $result );
 }
 

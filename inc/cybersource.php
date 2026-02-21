@@ -667,6 +667,7 @@ function boniface_cybersource_ajax_capture_context() {
 		'lastName'           => 'Donor',
 		'email'              => $email ?: 'donor@example.com',
 		'address1'           => '1 Market St',
+		'buildingNumber'     => '1',
 		'locality'           => 'San Francisco',
 		'administrativeArea' => 'CA',
 		'postalCode'         => '94105',
@@ -680,7 +681,6 @@ function boniface_cybersource_ajax_capture_context() {
 
 	error_log( '[CYBERSOURCE_CAPTURE_CTX] bill_to keys: ' . wp_json_encode( array_keys( $bill_to ) ) );
 	error_log( '[CYBERSOURCE_CAPTURE_CTX] bill_to values: ' . wp_json_encode( $bill_to ) );
-	error_log( '[CYBERSOURCE_CAPTURE_CTX] has buildingNumber key: ' . ( array_key_exists( 'buildingNumber', $bill_to ) ? 'YES - BUG!' : 'NO - correct' ) );
 
 	$result = boniface_cybersource_get_capture_context( $amount, $currency, $origin, $bill_to );
 

@@ -1,6 +1,6 @@
 /**
  * CyberSource Unified Checkout – donation form integration.
- * Loaded only on the donate page. Requires global bonifaceCybersource (ajaxUrl, nonce, origin).
+ * 3-step flow: Details → Billing Address → Payment.
  */
 (function ($) {
 	'use strict';
@@ -8,124 +8,124 @@
 	var MIN_AMOUNT = 10;
 	var config = window.bonifaceCybersource || {};
 	var $form = $('#donation-form');
-	var ucLoaded = false;
 	var ucAccept = null;
 
 	if (!$form.length) return;
 
+	/* ── Progress indicator ───────────────────────────────── */
+
 	function setProgress(step) {
-		var dots = document.querySelectorAll('.donation-progress-dot');
-		var lines = document.querySelectorAll('.donation-progress-line');
 		step = parseInt(step, 10) || 1;
-		dots.forEach(function (dot, i) {
-			dot.classList.toggle('active', i + 1 === step);
+		$('.donation-progress-dot').each(function (i) {
+			$(this).toggleClass('active', i + 1 === step);
 		});
-		lines.forEach(function (line, i) {
-			line.classList.toggle('completed', i < step);
+		$('.donation-progress-line').each(function (i) {
+			$(this).toggleClass('completed', i < step);
 		});
 	}
 
-	function setSubmitState(loading, error) {
-		var $btn = $('#donate-submit');
-		var $err = $('#donation-uc-error');
-		$btn.prop('disabled', !!loading);
-		$btn.toggleClass('is-loading', !!loading);
-		if (loading) {
-			$btn.find('.donate-btn-text').text('Preparing…');
-			$btn.find('.donate-btn-icon').addClass('hidden');
-		} else {
-			$btn.find('.donate-btn-text').text('Proceed to payment');
-			$btn.find('.donate-btn-icon').removeClass('hidden');
-		}
-		if (error && $err.length) {
-			$err.text(error).removeClass('hidden');
-		} else if ($err.length) {
-			$err.addClass('hidden').text('');
-		}
+	/* ── Step transitions ─────────────────────────────────── */
+
+	function hideAllSteps() {
+		$('.donation-form-step').addClass('hidden donation-step-hidden').removeClass('donation-step-visible');
 	}
 
-	function showDetailsStep() {
-		$('#donation-payment-step').addClass('hidden').removeClass('donation-step-visible').addClass('donation-step-hidden');
-		$('#donation-success-step, #donation-error-step').addClass('hidden').removeClass('donation-step-visible').addClass('donation-step-hidden');
-		$('#donation-details-step').removeClass('hidden').removeClass('donation-step-hidden').addClass('donation-step-visible');
-		setProgress(1);
+	function showStep($el, progressNum) {
+		hideAllSteps();
+		$el.removeClass('hidden donation-step-hidden').addClass('donation-step-visible');
+		setProgress(progressNum);
+		$el[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 	}
 
-	function showPaymentStep() {
-		$('#donation-details-step').removeClass('donation-step-visible').addClass('donation-step-hidden');
-		$('#donation-success-step, #donation-error-step').addClass('hidden');
-		$('#donation-payment-step').removeClass('hidden').removeClass('donation-step-hidden').addClass('donation-step-visible');
+	function showDetailsStep()  { showStep($('#donation-details-step'), 1); }
+	function showBillingStep()  { showStep($('#donation-billing-step'), 2); }
+	function showPaymentStep()  {
+		showStep($('#donation-payment-step'), 3);
 		$('#donation-payment-skeleton').removeClass('hidden');
-		setProgress(2);
+	}
+	function showSuccessStep(msg) {
+		showStep($('#donation-success-step'), 3);
+		$('#donation-success-step .success-message').text(msg || 'Thank you. Your donation has been processed.');
+	}
+	function showErrorStep(msg) {
+		showStep($('#donation-error-step'), 3);
+		$('#donation-error-step .error-message').text(msg || 'Something went wrong.');
 	}
 
-	function hidePaymentSkeleton() {
-		$('#donation-payment-skeleton').addClass('hidden');
+	/* ── Button state helper ──────────────────────────────── */
+
+	function setSubmitState(loading) {
+		var $btn = $('#donate-submit');
+		$btn.prop('disabled', !!loading).toggleClass('is-loading', !!loading);
+		$btn.find('.donate-btn-text').text(loading ? 'Preparing…' : 'Proceed to payment');
+		$btn.find('.donate-btn-icon').toggleClass('hidden', !!loading);
 	}
 
-	function showSuccessStep(message) {
-		$('#donation-payment-step').addClass('hidden');
-		$('#donation-success-step').find('.success-message').text(message || 'Thank you. Your donation has been processed.');
-		$('#donation-success-step').removeClass('hidden').removeClass('donation-step-hidden').addClass('donation-step-visible');
-		$('#donation-error-step').addClass('hidden');
-		setProgress(3);
+	/* ── Validation helpers ───────────────────────────────── */
+
+	function validateDetailsStep() {
+		var amount = parseFloat($('#amount').val()) || 0;
+		if (amount < MIN_AMOUNT) { $('#amount').focus(); return 'Minimum donation is $' + MIN_AMOUNT + '.'; }
+		if (!$('#name').val().trim()) { $('#name').focus(); return 'Please enter your name.'; }
+		if (!$('#email').val().trim()) { $('#email').focus(); return 'Please enter your email.'; }
+		if (!$('#phone').val().trim()) { $('#phone').focus(); return 'Please enter your phone number.'; }
+		return null;
 	}
 
-	function showErrorStep(message) {
-		$('#donation-payment-step').addClass('hidden');
-		$('#donation-error-step').find('.error-message').text(message || 'Something went wrong.');
-		$('#donation-error-step').removeClass('hidden').removeClass('donation-step-hidden').addClass('donation-step-visible');
-		$('#donation-success-step').addClass('hidden');
-		setProgress(3);
+	function validateBillingStep() {
+		if (!$('#billing-country').val()) { $('#billing-country').focus(); return 'Please select your country.'; }
+		if (!$('#billing-address').val().trim()) { $('#billing-address').focus(); return 'Please enter your street address.'; }
+		if (!$('#billing-city').val().trim()) { $('#billing-city').focus(); return 'Please enter your city.'; }
+		if (!$('#billing-postal').val().trim()) { $('#billing-postal').focus(); return 'Please enter your postal / ZIP code.'; }
+		return null;
 	}
 
-	function loadScript(src, integrity) {
-		return new Promise(function (resolve, reject) {
-			if (!src) {
-				reject(new Error('Payment script URL is missing. Please try again.'));
-				return;
-			}
-			if (document.querySelector('script[src="' + src + '"]')) {
-				resolve();
-				return;
-			}
-			var script = document.createElement('script');
-			script.src = src;
-			script.async = true;
-			script.crossOrigin = 'anonymous';
-			if (integrity) script.integrity = integrity;
-			script.onload = function () { resolve(); };
-			script.onerror = function () { reject(new Error('Failed to load payment script')); };
-			document.body.appendChild(script);
-		});
+	function showBillingError(msg) {
+		$('#billing-error').removeClass('hidden').text(msg);
 	}
+	function clearBillingError() {
+		$('#billing-error').addClass('hidden').text('');
+	}
+
+	/* ── Collect billing data ─────────────────────────────── */
+
+	function getBillingData() {
+		return {
+			country:  $('#billing-country').val(),
+			address1: $('#billing-address').val().trim(),
+			city:     $('#billing-city').val().trim(),
+			state:    $('#billing-state').val().trim(),
+			postal:   $('#billing-postal').val().trim()
+		};
+	}
+
+	/* ── CyberSource API calls ────────────────────────────── */
 
 	function getCaptureContext() {
-		var amount = parseFloat($('#amount').val(), 10) || 0;
-		var name = $('#name').val();
-		var email = $('#email').val();
-		var phone = $('#phone').val();
-		if (amount < MIN_AMOUNT) return $.Deferred().reject({ error: 'Minimum donation is $' + MIN_AMOUNT }).promise();
-		if (!name || !email || !phone) return $.Deferred().reject({ error: 'Please enter your name, email, and phone number.' }).promise();
-
+		var billing = getBillingData();
 		return $.ajax({
 			url: config.ajaxUrl,
 			type: 'POST',
 			data: {
 				action: 'boniface_cybersource_capture_context',
 				nonce: config.nonce,
-				amount: amount,
+				amount: parseFloat($('#amount').val()) || 0,
 				currency: 'USD',
 				origin: window.location.origin,
-				name: name,
-				email: email,
-				phone: phone
+				name: $('#name').val(),
+				email: $('#email').val(),
+				phone: $('#phone').val(),
+				billing_country:  billing.country,
+				billing_address:  billing.address1,
+				billing_city:     billing.city,
+				billing_state:    billing.state,
+				billing_postal:   billing.postal
 			}
 		});
 	}
 
 	function processPayment(transientToken) {
-		var amount = parseFloat($('#amount').val(), 10) || 0;
+		var billing = getBillingData();
 		return $.ajax({
 			url: config.ajaxUrl,
 			type: 'POST',
@@ -134,25 +134,42 @@
 				action: 'boniface_cybersource_process_payment',
 				nonce: config.nonce,
 				transient_token: transientToken,
-				amount: amount,
+				amount: parseFloat($('#amount').val()) || 0,
 				currency: 'USD',
 				name: $('#name').val(),
 				email: $('#email').val(),
 				phone: $('#phone').val(),
-				message: $('#message').val()
+				message: $('#message').val(),
+				billing_country:  billing.country,
+				billing_address:  billing.address1,
+				billing_city:     billing.city,
+				billing_state:    billing.state,
+				billing_postal:   billing.postal
 			}
 		});
 	}
 
-	function clearPaymentStepError() {
-		var $err = $('#donation-payment-error');
-		$err.addClass('hidden').empty();
+	/* ── Script loader ────────────────────────────────────── */
+
+	function loadScript(src, integrity) {
+		return new Promise(function (resolve, reject) {
+			if (!src) return reject(new Error('Payment script URL is missing.'));
+			if (document.querySelector('script[src="' + src + '"]')) return resolve();
+			var s = document.createElement('script');
+			s.src = src; s.async = true; s.crossOrigin = 'anonymous';
+			if (integrity) s.integrity = integrity;
+			s.onload = resolve;
+			s.onerror = function () { reject(new Error('Failed to load payment script')); };
+			document.body.appendChild(s);
+		});
 	}
 
-	function showPaymentStepError(msg) {
-		var $err = $('#donation-payment-error');
-		$err.removeClass('hidden').text(msg || 'Something went wrong. Please try again.');
-	}
+	/* ── Payment error helpers ────────────────────────────── */
+
+	function clearPaymentStepError() { $('#donation-payment-error').addClass('hidden').empty(); }
+	function showPaymentStepError(msg) { $('#donation-payment-error').removeClass('hidden').text(msg || 'Something went wrong.'); }
+
+	/* ── Unified Checkout runner ──────────────────────────── */
 
 	function runUnifiedCheckout(captureContext, clientLibrary, clientLibraryIntegrity) {
 		clearPaymentStepError();
@@ -163,13 +180,9 @@
 
 		return loadScript(clientLibrary, clientLibraryIntegrity || '')
 			.then(function () {
-				if (typeof window.Accept !== 'function') {
-					throw new Error('Payment library did not load. Please refresh and try again.');
-				}
-				var jwt = typeof captureContext === 'string' ? captureContext.trim() : '';
-				if (!jwt) {
-					throw new Error('You have not supplied a valid capture context.');
-				}
+				if (typeof window.Accept !== 'function') throw new Error('Payment library did not load.');
+				var jwt = (typeof captureContext === 'string') ? captureContext.trim() : '';
+				if (!jwt || jwt.split('.').length !== 3) throw new Error('Invalid capture context.');
 				return window.Accept(jwt);
 			})
 			.then(function (accept) {
@@ -177,130 +190,100 @@
 				return accept.unifiedPayments(false);
 			})
 			.then(function (up) {
-				var showArgs = {
-					containers: {
-						paymentSelection: '#buttonPaymentListContainer',
-						paymentScreen: '#embeddedPaymentContainer'
-					}
-				};
 				return new Promise(function (resolve, reject) {
 					var resolved = false;
-					function done(val) {
-						if (resolved) return;
-						resolved = true;
-						clearTimeout(timeoutId);
-						hidePaymentSkeleton();
-						resolve(val);
-					}
-					function fail(err) {
-						if (resolved) return;
-						resolved = true;
-						clearTimeout(timeoutId);
-						hidePaymentSkeleton();
-						reject(err);
-					}
-					var timeoutId = setTimeout(function () {
-						var hasContent = (sel && (sel.querySelector('iframe') || sel.children.length > 0)) ||
-							(screen && (screen.querySelector('iframe') || screen.children.length > 0));
-						if (!hasContent) {
-							fail(new Error('Payment form did not load. Check the browser console (F12) for errors, then refresh and try again.'));
-						} else {
-							hidePaymentSkeleton();
-						}
+					function done(v) { if (!resolved) { resolved = true; clearTimeout(tid); $('#donation-payment-skeleton').addClass('hidden'); resolve(v); } }
+					function fail(e) { if (!resolved) { resolved = true; clearTimeout(tid); $('#donation-payment-skeleton').addClass('hidden'); reject(e); } }
+					var tid = setTimeout(function () {
+						var has = (sel && (sel.querySelector('iframe') || sel.children.length)) ||
+								  (screen && (screen.querySelector('iframe') || screen.children.length));
+						if (!has) fail(new Error('Payment form did not load. Please refresh and try again.'));
+						else $('#donation-payment-skeleton').addClass('hidden');
 					}, 5000);
 					setTimeout(function () {
-						up.show(showArgs).then(done).catch(function (err) {
-							console.error('Unified Checkout show error:', err);
-							var msg = (err && err.message) ? err.message : (err && err.reason) ? err.reason : 'Payment form could not be loaded.';
-							fail(new Error(msg));
-						});
+						up.show({ containers: { paymentSelection: '#buttonPaymentListContainer', paymentScreen: '#embeddedPaymentContainer' } })
+							.then(done)
+							.catch(function (err) {
+								fail(new Error((err && err.message) || 'Payment form could not be loaded.'));
+							});
 					}, 150);
 				});
 			});
 	}
 
-	$form.on('submit', function (e) {
-		e.preventDefault();
+	/* ── Step 1 → Step 2: "Continue to billing" button ────── */
 
-		var amount = parseFloat($('#amount').val(), 10) || 0;
-		if (isNaN(amount) || amount < MIN_AMOUNT) {
-			$('#amount').focus().val(MIN_AMOUNT);
+	$('#to-billing-step').on('click', function () {
+		var err = validateDetailsStep();
+		if (err) {
+			if (!$('#step1-error').length) {
+				$('#to-billing-step').before('<p id="step1-error" class="text-red-600 text-sm mb-3 hidden"></p>');
+			}
+			$('#step1-error').text(err).removeClass('hidden');
 			return;
 		}
+		$('#step1-error').addClass('hidden');
+		showBillingStep();
+	});
+
+	/* ── Step 2 → Step 3: Form submit ─────────────────────── */
+
+	$form.on('submit', function (e) {
+		e.preventDefault();
+		clearBillingError();
+
+		var err = validateBillingStep();
+		if (err) { showBillingError(err); return; }
 
 		setSubmitState(true);
 
 		getCaptureContext()
 			.then(function (res) {
-				if (!res.success) {
-					throw new Error(res.error || 'Could not start payment');
-				}
-				if (!res.client_library) {
-					throw new Error('Payment form could not be loaded. Please refresh the page and try again.');
-				}
+				if (!res.success) throw new Error(res.error || 'Could not start payment');
+				if (!res.client_library) throw new Error('Payment form could not be loaded. Please refresh.');
 				showPaymentStep();
 				setSubmitState(false);
-				var ctx = res.capture_context;
-				if (typeof ctx !== 'string' || !ctx) {
-					throw new Error('Invalid capture context received. Please refresh and try again.');
-				}
-				ctx = ctx.trim();
-				if (ctx.split('.').length !== 3) {
-					throw new Error('Invalid capture context format. Please refresh and try again.');
-				}
-				return runUnifiedCheckout(
-					ctx,
-					res.client_library,
-					res.client_library_integrity
-				);
+				var ctx = (res.capture_context || '').trim();
+				if (!ctx || ctx.split('.').length !== 3) throw new Error('Invalid capture context. Please refresh.');
+				return runUnifiedCheckout(ctx, res.client_library, res.client_library_integrity);
 			})
 			.then(function (transientToken) {
 				if (!transientToken) throw new Error('No payment token received');
-				$('#donate-submit').find('.donate-btn-text').text('Processing…');
 				setSubmitState(true);
+				$('#donate-submit .donate-btn-text').text('Processing…');
 				return processPayment(transientToken);
 			})
 			.then(function (res) {
 				setSubmitState(false);
-				if (res.success) {
-					showSuccessStep('Thank you. Your donation has been processed successfully.');
-				} else {
-					showErrorStep(res.error || 'Payment could not be completed.');
-				}
+				if (res.success) showSuccessStep('Thank you. Your donation has been processed successfully.');
+				else showErrorStep(res.error || 'Payment could not be completed.');
 			})
 			.catch(function (err) {
 				setSubmitState(false);
-				var msg = (err && err.error) ? err.error : (err && err.message) ? err.message : 'Something went wrong. Please try again.';
+				var msg = (err && err.error) ? err.error : (err && err.message) ? err.message : 'Something went wrong.';
 				if (err && (err.status === 502 || err.status === 503 || err.status === 504)) {
-					msg = 'The payment request could not be completed (server ' + (err.status || '') + '). Please try again in a moment.';
-				} else if (err && err.status === 0 && (err.statusText === 'timeout' || (err.message && err.message.indexOf('timeout') !== -1))) {
-					msg = 'The request took too long. Please check your connection and try again.';
+					msg = 'Payment request failed (server ' + err.status + '). Please try again.';
+				} else if (err && err.status === 0 && err.statusText === 'timeout') {
+					msg = 'Request timed out. Please check your connection and try again.';
 				}
-				if ($('#donation-payment-step').is(':visible')) {
-					showPaymentStepError(msg);
-				} else {
-					if (!$('#donation-uc-error').length) {
-						$form.find('#donate-submit').closest('div').before('<p id="donation-uc-error" class="text-red-600 text-sm mt-2 hidden"></p>');
-					}
-					$('#donation-uc-error').text(msg).removeClass('hidden');
-				}
+				if ($('#donation-payment-step').is(':visible')) showPaymentStepError(msg);
+				else showBillingError(msg);
 			});
 	});
 
-	// Back to details
-	$('#donation-back-to-details').on('click', function () {
-		showDetailsStep();
-	});
-	// Retry after error
+	/* ── Back / Retry buttons ─────────────────────────────── */
+
+	$('#billing-back-to-details').on('click', showDetailsStep);
+	$('#donation-back-to-billing').on('click', showBillingStep);
 	$('#donation-retry-btn').on('click', function () {
-		$('#donation-error-step').addClass('hidden');
-		showDetailsStep();
-		$('#donation-uc-error').addClass('hidden').text('');
+		showBillingStep();
 	});
 
-	// Preset amount and form validation (keep existing behavior)
+	/* ── Preset amount buttons ────────────────────────────── */
+
 	var amountInput = document.getElementById('amount');
 	var presets = $form[0].querySelectorAll('.preset-amount');
+
 	function setPresetActive(btn) {
 		for (var i = 0; i < presets.length; i++) {
 			var b = presets[i];
@@ -314,25 +297,25 @@
 			btn.classList.add('border-neutral-900', 'bg-neutral-900', 'text-white');
 		}
 	}
+
 	for (var j = 0; j < presets.length; j++) {
 		presets[j].addEventListener('click', function () {
-			var val = parseInt(this.getAttribute('data-amount'), 10);
-			amountInput.value = val;
+			amountInput.value = parseInt(this.getAttribute('data-amount'), 10);
 			setPresetActive(this);
 		});
 	}
+
 	if (amountInput) {
 		amountInput.addEventListener('input', function () {
 			var val = parseInt(amountInput.value, 10);
-			var matched = null;
+			var match = null;
 			for (var k = 0; k < presets.length; k++) {
-				if (parseInt(presets[k].getAttribute('data-amount'), 10) === val) matched = presets[k];
+				if (parseInt(presets[k].getAttribute('data-amount'), 10) === val) match = presets[k];
 			}
-			setPresetActive(matched);
+			setPresetActive(match);
 		});
 		amountInput.addEventListener('change', function () {
-			var val = parseInt(amountInput.value, 10);
-			if (isNaN(val) || val < MIN_AMOUNT) amountInput.value = MIN_AMOUNT;
+			if (isNaN(parseInt(amountInput.value, 10)) || parseInt(amountInput.value, 10) < MIN_AMOUNT) amountInput.value = MIN_AMOUNT;
 		});
 	}
 

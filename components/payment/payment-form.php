@@ -1,6 +1,6 @@
 <form class="payment-form relative" id="donation-form">
 
-    <!-- Progress: 1 — 2 — 3 (visible on all steps) -->
+    <!-- Progress: 1 — 2 — 3 -->
     <div class="flex items-center justify-center gap-2 mb-10" aria-label="Progress">
         <div class="donation-progress-dot active flex items-center justify-center">
             <span class="donation-progress-num" data-step="1">1</span>
@@ -15,7 +15,9 @@
         </div>
     </div>
 
-    <!-- Step 1: Donor details + amount -->
+    <!-- ============================================================ -->
+    <!-- Step 1: Amount + Your details                                -->
+    <!-- ============================================================ -->
     <div id="donation-details-step" class="donation-form-step donation-step-visible space-y-8">
         <!-- Amount -->
         <div>
@@ -28,7 +30,7 @@
                 foreach ( $presets as $p ) :
                 ?>
                 <button type="button" data-amount="<?php echo (int) $p; ?>"
-                    class="preset-amount h-12 rounded-xl border-2 border-neutral-200 bg-white text-sm font-semibold text-neutral-700 transition-all duration-200 hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:ring-offset-2 aria-pressed="false">
+                    class="preset-amount h-12 rounded-xl border-2 border-neutral-200 bg-white text-sm font-semibold text-neutral-700 transition-all duration-200 hover:border-neutral-300 hover:bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:ring-offset-2" aria-pressed="false">
                     $<?php echo (int) $p; ?>
                 </button>
                 <?php endforeach; ?>
@@ -76,7 +78,103 @@
                 class="input-field w-full rounded-xl border-2 border-neutral-200 bg-white px-4 py-3.5 text-neutral-900 placeholder:text-neutral-400 transition-all duration-200 focus:outline-none focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900/20 resize-none"></textarea>
         </div>
 
-        <!-- Submit -->
+        <!-- Next -->
+        <div class="pt-2">
+            <button type="button" id="to-billing-step"
+                class="w-full inline-flex justify-center items-center gap-3 rounded-xl bg-neutral-900 px-6 py-4 text-base font-semibold text-white shadow-lg shadow-neutral-900/20 transition-all duration-200 hover:bg-neutral-800 hover:shadow-xl hover:shadow-neutral-900/25 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:ring-offset-2 active:scale-[0.99]">
+                <span>Continue to billing</span>
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Step 2: Billing address                                      -->
+    <!-- ============================================================ -->
+    <div id="donation-billing-step" class="donation-form-step donation-step-hidden hidden space-y-6">
+        <div class="flex items-center justify-between gap-4">
+            <h3 class="text-sm font-semibold text-neutral-800 tracking-tight">Billing address</h3>
+            <button type="button" id="billing-back-to-details" class="text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors flex items-center gap-1.5" aria-label="Back to details">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
+                Back
+            </button>
+        </div>
+
+        <p class="text-sm text-neutral-500">Required by the payment processor for verification.</p>
+
+        <!-- Country -->
+        <div>
+            <label for="billing-country" class="block text-sm font-medium text-neutral-700 mb-1.5">Country</label>
+            <select id="billing-country" name="billing_country" autocomplete="country"
+                class="input-field w-full rounded-xl border-2 border-neutral-200 bg-white px-4 py-3.5 text-neutral-900 transition-all duration-200 focus:outline-none focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900/20"
+                required>
+                <option value="">Select your country</option>
+                <option value="US">United States</option>
+                <option value="KE">Kenya</option>
+                <option value="GB">United Kingdom</option>
+                <option value="CA">Canada</option>
+                <option value="AU">Australia</option>
+                <option value="DE">Germany</option>
+                <option value="FR">France</option>
+                <option value="IN">India</option>
+                <option value="NG">Nigeria</option>
+                <option value="ZA">South Africa</option>
+                <option value="UG">Uganda</option>
+                <option value="TZ">Tanzania</option>
+                <option value="GH">Ghana</option>
+                <option value="AE">United Arab Emirates</option>
+                <option value="JP">Japan</option>
+                <option value="CN">China</option>
+                <option value="BR">Brazil</option>
+                <option value="MX">Mexico</option>
+                <option value="IT">Italy</option>
+                <option value="ES">Spain</option>
+                <option value="NL">Netherlands</option>
+                <option value="SE">Sweden</option>
+                <option value="NO">Norway</option>
+                <option value="DK">Denmark</option>
+                <option value="CH">Switzerland</option>
+                <option value="SG">Singapore</option>
+                <option value="HK">Hong Kong</option>
+                <option value="NZ">New Zealand</option>
+                <option value="IE">Ireland</option>
+                <option value="RW">Rwanda</option>
+                <option value="ET">Ethiopia</option>
+            </select>
+        </div>
+
+        <!-- Street address -->
+        <div>
+            <label for="billing-address" class="block text-sm font-medium text-neutral-700 mb-1.5">Street address</label>
+            <input type="text" id="billing-address" name="billing_address" autocomplete="address-line1" placeholder="123 Main Street"
+                class="input-field w-full rounded-xl border-2 border-neutral-200 bg-white px-4 py-3.5 text-neutral-900 placeholder:text-neutral-400 transition-all duration-200 focus:outline-none focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900/20"
+                required />
+        </div>
+
+        <!-- City / State / Postal — 3 columns on desktop -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+                <label for="billing-city" class="block text-sm font-medium text-neutral-700 mb-1.5">City</label>
+                <input type="text" id="billing-city" name="billing_city" autocomplete="address-level2" placeholder="Nairobi"
+                    class="input-field w-full rounded-xl border-2 border-neutral-200 bg-white px-4 py-3.5 text-neutral-900 placeholder:text-neutral-400 transition-all duration-200 focus:outline-none focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900/20"
+                    required />
+            </div>
+            <div>
+                <label for="billing-state" class="block text-sm font-medium text-neutral-700 mb-1.5">State / Province</label>
+                <input type="text" id="billing-state" name="billing_state" autocomplete="address-level1" placeholder="CA"
+                    class="input-field w-full rounded-xl border-2 border-neutral-200 bg-white px-4 py-3.5 text-neutral-900 placeholder:text-neutral-400 transition-all duration-200 focus:outline-none focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900/20" />
+            </div>
+            <div>
+                <label for="billing-postal" class="block text-sm font-medium text-neutral-700 mb-1.5">Postal / ZIP code</label>
+                <input type="text" id="billing-postal" name="billing_postal" autocomplete="postal-code" placeholder="00100"
+                    class="input-field w-full rounded-xl border-2 border-neutral-200 bg-white px-4 py-3.5 text-neutral-900 placeholder:text-neutral-400 transition-all duration-200 focus:outline-none focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900/20"
+                    required />
+            </div>
+        </div>
+
+        <div id="billing-error" class="hidden rounded-xl border-2 border-red-200 bg-red-50 p-4 text-red-800 text-sm font-medium"></div>
+
+        <!-- Submit to payment -->
         <div class="pt-2">
             <button type="submit" id="donate-submit"
                 class="donate-submit-btn w-full inline-flex justify-center items-center gap-3 rounded-xl bg-neutral-900 px-6 py-4 text-base font-semibold text-white shadow-lg shadow-neutral-900/20 transition-all duration-200 hover:bg-neutral-800 hover:shadow-xl hover:shadow-neutral-900/25 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:ring-offset-2 active:scale-[0.99] disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:shadow-lg">
@@ -95,17 +193,19 @@
         </div>
     </div>
 
-    <!-- Step 2: Payment (CyberSource) -->
+    <!-- ============================================================ -->
+    <!-- Step 3: Payment (CyberSource widget)                         -->
+    <!-- ============================================================ -->
     <div id="donation-payment-step" class="donation-form-step donation-step-hidden hidden space-y-6">
         <div class="flex items-center justify-between gap-4">
             <p class="text-sm font-medium text-neutral-700">Complete your donation with card or digital wallet.</p>
-            <button type="button" id="donation-back-to-details" class="text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors flex items-center gap-1.5" aria-label="Back to details">
+            <button type="button" id="donation-back-to-billing" class="text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors flex items-center gap-1.5" aria-label="Back to billing">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
                 Back
             </button>
         </div>
         <div id="donation-payment-error" class="hidden rounded-xl border-2 border-red-200 bg-red-50 p-4 text-red-800 text-sm font-medium"></div>
-        <!-- Skeleton overlay while UC loads; UC containers underneath for SDK injection -->
+        <!-- Skeleton overlay while UC loads -->
         <div class="relative min-h-[360px]">
             <div id="donation-payment-skeleton" class="absolute inset-0 z-10 flex flex-col gap-4 pointer-events-none">
                 <div class="donation-skeleton h-20 w-full flex-0"></div>
@@ -118,7 +218,7 @@
         </div>
     </div>
 
-    <!-- Step 3: Success -->
+    <!-- Success -->
     <div id="donation-success-step" class="donation-form-step donation-step-hidden hidden text-center py-8 px-6 rounded-2xl border-2 border-emerald-200 bg-gradient-to-b from-emerald-50 to-white">
         <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-100 mb-6">
             <svg class="w-8 h-8 text-emerald-600 donation-success-check" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -129,7 +229,7 @@
         <p class="text-sm text-emerald-700/90">A confirmation email has been sent to you.</p>
     </div>
 
-    <!-- Error state -->
+    <!-- Error -->
     <div id="donation-error-step" class="donation-form-step donation-step-hidden hidden text-center py-8 px-6 rounded-2xl border-2 border-red-200 bg-red-50">
         <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-100 mb-6">
             <svg class="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">

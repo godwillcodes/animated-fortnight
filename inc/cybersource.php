@@ -29,33 +29,8 @@ function boniface_cybersource_config() {
 }
 
 /**
- * Decode JWT payload (middle part) without verifying signature.
- * Used for diagnostic logging of capture context and transient tokens.
- *
- * @param string $jwt Raw JWT string.
- * @return array|null Decoded payload or null on failure.
- */
-function boniface_cybersource_decode_jwt_payload( $jwt ) {
-	if ( empty( $jwt ) || ! is_string( $jwt ) ) {
-		return null;
-	}
-	$parts = explode( '.', $jwt );
-	if ( count( $parts ) < 2 ) {
-		return null;
-	}
-	$b64 = $parts[1];
-	$b64 = strtr( $b64, '-_', '+/' );
-	$json = base64_decode( $b64, true );
-	if ( $json === false ) {
-		return null;
-	}
-	$payload = json_decode( $json, true );
-	return is_array( $payload ) ? $payload : null;
-}
-
-/**
- * Log merchant ID verification (compact).
- * Only emits a warning when a mismatch is detected.
+ * Log merchant ID verification with full diagnostic output.
+ * Always logs everything so we can diagnose 502 issues.
  *
  * @param array  $config  Config from boniface_cybersource_config().
  * @param array  $headers Headers being sent.
@@ -70,8 +45,17 @@ function boniface_cybersource_log_merchant_verification( $config, $headers, $con
 	$mid_ok = ( $header_mid === $expected_mid );
 	$kid_ok = ( strpos( $sig_header, 'keyid="' . $expected_kid . '"' ) !== false );
 
+	error_log( '[CYBERSOURCE][' . $context . '] === MERCHANT VERIFICATION ===' );
+	error_log( '[CYBERSOURCE][' . $context . '] merchant_id=' . $expected_mid . ' (header=' . $header_mid . ') ' . ( $mid_ok ? 'OK' : 'MISMATCH!' ) );
+	error_log( '[CYBERSOURCE][' . $context . '] key_id=' . $expected_kid . ' ' . ( $kid_ok ? 'OK' : 'MISMATCH!' ) );
+	error_log( '[CYBERSOURCE][' . $context . '] env=' . ( $config ? $config['env'] : 'NONE' ) );
+	error_log( '[CYBERSOURCE][' . $context . '] secret_length=' . ( $config ? strlen( $config['shared_secret'] ) : 0 ) );
+	error_log( '[CYBERSOURCE][' . $context . '] host_header=' . ( isset( $headers['Host'] ) ? $headers['Host'] : 'MISSING' ) );
+	error_log( '[CYBERSOURCE][' . $context . '] v-c-date=' . ( isset( $headers['v-c-date'] ) ? $headers['v-c-date'] : 'MISSING' ) );
+	error_log( '[CYBERSOURCE][' . $context . '] digest=' . ( isset( $headers['Digest'] ) ? substr( $headers['Digest'], 0, 40 ) . '...' : 'MISSING' ) );
+	error_log( '[CYBERSOURCE][' . $context . '] signature=' . substr( $sig_header, 0, 80 ) . '...' );
 	if ( ! $mid_ok || ! $kid_ok ) {
-		error_log( '[CYBERSOURCE][' . $context . '] MERCHANT MISMATCH: header_mid=' . $header_mid . ' expected=' . $expected_mid . ' kid_ok=' . ( $kid_ok ? 'Y' : 'N' ) );
+		error_log( '[CYBERSOURCE][' . $context . '] !!! CREDENTIAL MISMATCH DETECTED — this WILL cause failures !!!' );
 	}
 }
 
@@ -291,13 +275,15 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 		}
 	}
 
+	$client_ref = 'donation-' . substr( uniqid( '', true ), -8 );
+
 	$payload = array(
 		'targetOrigins'       => array( $origin ),
 		'clientVersion'       => '0.34',
-		'buttonType'          => 'CHECKOUT_AND_CONTINUE',
-		'allowedCardNetworks' => array( 'VISA', 'MASTERCARD' ),
-		'allowedPaymentTypes' => array( 'PANENTRY', 'CLICKTOPAY', 'APPLEPAY', 'GOOGLEPAY' ),
-		'country'             => 'US',
+		'buttonType'          => 'DONATE',
+		'allowedCardNetworks' => array( 'VISA', 'MASTERCARD', 'AMEX' ),
+		'allowedPaymentTypes' => array( 'PANENTRY', 'CLICKTOPAY', 'APPLEPAY', 'GOOGLEPAY', 'PAZE' ),
+		'country'             => 'KE',
 		'locale'              => 'en_US',
 		'captureMandate'      => array(
 			'billingType'              => 'FULL',
@@ -305,6 +291,10 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 			'requestPhone'             => true,
 			'requestShipping'          => false,
 			'showAcceptedNetworkIcons' => true,
+			'showConfirmationStep'     => false,
+		),
+		'transientTokenResponseOptions' => array(
+			'includeCardPrefix' => true,
 		),
 		'data' => array(
 			'orderInformation' => array(
@@ -315,7 +305,7 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 				),
 			),
 			'clientReferenceInformation' => array(
-				'code' => 'donation-' . substr( uniqid( '', true ), -8 ),
+				'code' => $client_ref,
 			),
 		),
 	);
@@ -323,6 +313,11 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 	$body    = wp_json_encode( $payload );
 	$headers = boniface_cybersource_signature_headers( 'POST', $resource, $body );
 
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] === CAPTURE CONTEXT REQUEST ===' );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] origin=' . $origin . ' amount=' . $total_amount . ' currency=' . $currency . ' ref=' . $client_ref );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] country=KE locale=en_US buttonType=DONATE' );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] billTo: ' . wp_json_encode( $bill_to ) );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] payload_size=' . strlen( $body ) . ' bytes' );
 	boniface_cybersource_log_merchant_verification( $config, $headers, 'CAPTURE_CTX' );
 
 	$response = wp_remote_post( $base_url . $resource, array(
@@ -336,11 +331,15 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 
 	if ( is_wp_error( $response ) ) {
 		error_log( '[CYBERSOURCE][CAPTURE_CTX] WP_Error: ' . $response->get_error_message() );
+		error_log( '[CYBERSOURCE][CAPTURE_CTX] WP transport: ' . get_class( $response ) );
 		return array( 'success' => false, 'error' => $response->get_error_message() );
 	}
 
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] HTTP ' . $code . ' response_size=' . strlen( $body_response ) . ' bytes' );
+
 	if ( $code !== 200 && $code !== 201 ) {
-		error_log( '[CYBERSOURCE][CAPTURE_CTX] HTTP ' . $code . ': ' . substr( $body_response, 0, 300 ) );
+		error_log( '[CYBERSOURCE][CAPTURE_CTX] FAILED body: ' . substr( $body_response, 0, 500 ) );
+		error_log( '[CYBERSOURCE][CAPTURE_CTX] response_headers: ' . wp_json_encode( wp_remote_retrieve_headers( $response )->getAll() ) );
 		return array(
 			'success' => false,
 			'error'   => 'Capture context request failed (' . $code . '): ' . substr( $body_response, 0, 200 ),
@@ -431,6 +430,9 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 		}
 	}
 
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] SUCCESS jwt_length=' . strlen( $capture_context_jwt ) . ' client_lib=' . ( $client_library ? 'YES' : 'MISSING' ) );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] jwt_first80: ' . substr( $capture_context_jwt, 0, 80 ) );
+
 	return array(
 		'success'                 => true,
 		'capture_context'         => $capture_context_jwt,
@@ -457,10 +459,36 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 	$total_amount = number_format( (float) $amount, 2, '.', '' );
 	$resource     = '/pts/v2/payments';
 	$base_url     = boniface_cybersource_base_url();
+	$client_ref   = 'donation-' . substr( uniqid( '', true ), -8 );
+
+	$token_parts = explode( '.', $transient_token_jwt );
+	error_log( '[CYBERSOURCE][PAYMENT] === PRE-FLIGHT DIAGNOSTICS ===' );
+	error_log( '[CYBERSOURCE][PAYMENT] PHP=' . PHP_VERSION . ' WP=' . get_bloginfo( 'version' ) . ' time=' . gmdate( 'c' ) );
+	error_log( '[CYBERSOURCE][PAYMENT] token_parts=' . count( $token_parts ) . ' token_length=' . strlen( $transient_token_jwt ) );
+	error_log( '[CYBERSOURCE][PAYMENT] amount=' . $total_amount . ' currency=' . $currency . ' ref=' . $client_ref );
+	error_log( '[CYBERSOURCE][PAYMENT] billTo: ' . wp_json_encode( $bill_to ) );
+
+	if ( count( $token_parts ) === 3 ) {
+		$token_payload_b64 = strtr( $token_parts[1], '-_', '+/' );
+		$token_payload_json = base64_decode( $token_payload_b64, true );
+		if ( $token_payload_json ) {
+			$token_payload = json_decode( $token_payload_json, true );
+			if ( is_array( $token_payload ) ) {
+				error_log( '[CYBERSOURCE][PAYMENT] token_iss=' . ( isset( $token_payload['iss'] ) ? $token_payload['iss'] : 'N/A' ) );
+				error_log( '[CYBERSOURCE][PAYMENT] token_exp=' . ( isset( $token_payload['exp'] ) ? $token_payload['exp'] . ' (' . gmdate( 'c', $token_payload['exp'] ) . ')' : 'N/A' ) );
+				error_log( '[CYBERSOURCE][PAYMENT] token_iat=' . ( isset( $token_payload['iat'] ) ? $token_payload['iat'] . ' (' . gmdate( 'c', $token_payload['iat'] ) . ')' : 'N/A' ) );
+				$now = time();
+				if ( isset( $token_payload['exp'] ) && $now > $token_payload['exp'] ) {
+					error_log( '[CYBERSOURCE][PAYMENT] !!! TOKEN EXPIRED !!! now=' . $now . ' exp=' . $token_payload['exp'] . ' expired_ago=' . ( $now - $token_payload['exp'] ) . 's' );
+				}
+				error_log( '[CYBERSOURCE][PAYMENT] token_keys=' . implode( ',', array_keys( $token_payload ) ) );
+			}
+		}
+	}
 
 	$payload = array(
 		'clientReferenceInformation' => array(
-			'code' => 'donation-' . substr( uniqid( '', true ), -8 ),
+			'code' => $client_ref,
 		),
 		'processingInformation' => array(
 			'commerceIndicator' => 'internet',
@@ -483,14 +511,33 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 
 	boniface_cybersource_log_merchant_verification( $config, $headers, 'PAYMENT' );
 
+	error_log( '[CYBERSOURCE][PAYMENT] === POSTMAN: COPY EVERYTHING BELOW ===' );
+	error_log( '[CYBERSOURCE][PAYMENT] POST ' . $base_url . $resource );
+	error_log( '[CYBERSOURCE][PAYMENT] --- HEADERS ---' );
+	error_log( '[CYBERSOURCE][PAYMENT] Content-Type: application/json' );
+	error_log( '[CYBERSOURCE][PAYMENT] v-c-merchant-id: ' . $headers['v-c-merchant-id'] );
+	error_log( '[CYBERSOURCE][PAYMENT] v-c-date: ' . $headers['v-c-date'] );
+	error_log( '[CYBERSOURCE][PAYMENT] Host: ' . $headers['Host'] );
+	error_log( '[CYBERSOURCE][PAYMENT] Digest: ' . ( isset( $headers['Digest'] ) ? $headers['Digest'] : '' ) );
+	error_log( '[CYBERSOURCE][PAYMENT] Signature: ' . $headers['Signature'] );
+	error_log( '[CYBERSOURCE][PAYMENT] --- FULL BODY (paste as raw JSON) ---' );
+	error_log( '[CYBERSOURCE][PAYMENT] ' . $body );
+	error_log( '[CYBERSOURCE][PAYMENT] --- TRANSIENT TOKEN (full, for API console) ---' );
+	error_log( '[CYBERSOURCE][PAYMENT] ' . $transient_token_jwt );
+	error_log( '[CYBERSOURCE][PAYMENT] --- END POSTMAN ---' );
+	error_log( '[CYBERSOURCE][PAYMENT] NOTE: Signature/Digest headers are time-sensitive. For Postman, use CyberSource auth with your key_id=' . $config['key_id'] . ' and shared_secret (you have it in wp-config).' );
+
+	$start_time = microtime( true );
 	$response = wp_remote_post( $base_url . $resource, array(
 		'timeout' => 60,
 		'headers' => $headers,
 		'body'    => $body,
 	) );
+	$elapsed = round( ( microtime( true ) - $start_time ) * 1000 );
 
 	if ( is_wp_error( $response ) ) {
-		error_log( '[CYBERSOURCE][PAYMENT] WP_Error: ' . $response->get_error_message() );
+		error_log( '[CYBERSOURCE][PAYMENT] WP_Error after ' . $elapsed . 'ms: ' . $response->get_error_message() );
+		error_log( '[CYBERSOURCE][PAYMENT] WP_Error codes: ' . implode( ', ', $response->get_error_codes() ) );
 		return array(
 			'success'     => false,
 			'error'       => $response->get_error_message(),
@@ -501,17 +548,24 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 	$code          = wp_remote_retrieve_response_code( $response );
 	$body_response = wp_remote_retrieve_body( $response );
 	$data          = json_decode( $body_response, true );
+	$resp_headers  = wp_remote_retrieve_headers( $response );
+
+	error_log( '[CYBERSOURCE][PAYMENT] === RESPONSE ===' );
+	error_log( '[CYBERSOURCE][PAYMENT] HTTP ' . $code . ' in ' . $elapsed . 'ms' );
+	error_log( '[CYBERSOURCE][PAYMENT] response_size=' . strlen( $body_response ) . ' bytes' );
+	$correlation_id = isset( $resp_headers['v-c-correlation-id'] ) ? $resp_headers['v-c-correlation-id'] : 'N/A';
+	error_log( '[CYBERSOURCE][PAYMENT] v-c-correlation-id=' . $correlation_id );
+	error_log( '[CYBERSOURCE][PAYMENT] Full response body: ' . $body_response );
 
 	$status     = isset( $data['status'] ) ? $data['status'] : '';
 	$is_success = ( $code >= 200 && $code < 300 )
 		&& ( empty( $status ) || in_array( $status, array( 'AUTHORIZED', 'CAPTURED', 'PENDING' ), true ) );
 
 	if ( $is_success ) {
-		error_log( '[CYBERSOURCE][PAYMENT] SUCCESS id=' . ( isset( $data['id'] ) ? $data['id'] : '' ) );
+		error_log( '[CYBERSOURCE][PAYMENT] SUCCESS status=' . $status . ' id=' . ( isset( $data['id'] ) ? $data['id'] : '' ) );
 		return array( 'success' => true, 'id' => isset( $data['id'] ) ? $data['id'] : '' );
 	}
 
-	// Extract error details from multiple response structures
 	$reason_code = '';
 	$message     = '';
 
@@ -531,8 +585,17 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 		$message = 'Payment ' . strtolower( str_replace( '_', ' ', $status ) );
 	}
 
-	error_log( '[CYBERSOURCE][PAYMENT] FAILED HTTP ' . $code . ' status=' . $status . ' reason=' . $reason_code . ' msg=' . $message );
-	error_log( '[CYBERSOURCE][PAYMENT] Full response: ' . substr( $body_response, 0, 500 ) );
+	error_log( '[CYBERSOURCE][PAYMENT] FAILED status=' . $status . ' reason=' . $reason_code . ' msg=' . $message );
+	if ( $code === 502 && $reason_code === 'SYSTEM_ERROR' ) {
+		error_log( '[CYBERSOURCE][PAYMENT] !!! 502 SYSTEM_ERROR — THIS IS A CYBERSOURCE SERVER/CONFIG ISSUE !!!' );
+		error_log( '[CYBERSOURCE][PAYMENT] Possible causes:' );
+		error_log( '[CYBERSOURCE][PAYMENT]   1. No payment processor assigned to merchant ID' );
+		error_log( '[CYBERSOURCE][PAYMENT]   2. Merchant account not activated for card-not-present' );
+		error_log( '[CYBERSOURCE][PAYMENT]   3. Currency (USD) not enabled for merchant' );
+		error_log( '[CYBERSOURCE][PAYMENT]   4. Country/region restriction on merchant account' );
+		error_log( '[CYBERSOURCE][PAYMENT]   5. Test account not fully provisioned' );
+		error_log( '[CYBERSOURCE][PAYMENT] Contact CyberSource support with v-c-correlation-id above.' );
+	}
 
 	$error_msg = $message;
 	if ( empty( $error_msg ) ) {
@@ -548,6 +611,7 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 		'success'     => false,
 		'error'       => $error_msg,
 		'reason_code' => $reason_code ?: ( $status ?: (string) $code ),
+		'correlation_id' => $correlation_id !== 'N/A' ? $correlation_id : '',
 	);
 }
 
@@ -563,7 +627,7 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
  * @return array CyberSource-compatible billTo.
  */
 function boniface_cybersource_build_bill_to( $name, $email, $capture_context = false ) {
-	$country  = isset( $_POST['billing_country'] ) ? strtoupper( sanitize_text_field( wp_unslash( $_POST['billing_country'] ) ) ) : 'US';
+	$country  = isset( $_POST['billing_country'] ) ? strtoupper( sanitize_text_field( wp_unslash( $_POST['billing_country'] ) ) ) : '';
 	$address1 = isset( $_POST['billing_address'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_address'] ) ) : '';
 	$city     = isset( $_POST['billing_city'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_city'] ) ) : '';
 	$state    = isset( $_POST['billing_state'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_state'] ) ) : '';
@@ -571,11 +635,11 @@ function boniface_cybersource_build_bill_to( $name, $email, $capture_context = f
 	$phone    = isset( $_POST['phone'] ) ? sanitize_text_field( wp_unslash( $_POST['phone'] ) ) : '';
 
 	if ( ! empty( $state ) ) {
-		$state = boniface_cybersource_normalize_region( $state, $country );
+		$state = boniface_cybersource_normalize_region( $state, $country ?: 'US' );
 	}
 
-	$first = 'Donor';
-	$last  = 'Donor';
+	$first = '';
+	$last  = '';
 	if ( $name ) {
 		$parts = preg_split( '/\s+/', trim( $name ), 2 );
 		$first = $parts[0];
@@ -588,25 +652,37 @@ function boniface_cybersource_build_bill_to( $name, $email, $capture_context = f
 
 	$phone_digits = preg_replace( '/[^0-9]/', '', $phone );
 	if ( strlen( $phone_digits ) < 7 ) {
-		$phone_digits = '0000000000';
+		$phone_digits = '';
+	}
+
+	$missing = array();
+	if ( empty( $first ) )    $missing[] = 'firstName';
+	if ( empty( $email ) )    $missing[] = 'email';
+	if ( empty( $address1 ) ) $missing[] = 'address1';
+	if ( empty( $city ) )     $missing[] = 'locality';
+	if ( empty( $postal ) )   $missing[] = 'postalCode';
+	if ( empty( $country ) )  $missing[] = 'country';
+	if ( ! empty( $missing ) ) {
+		error_log( '[CYBERSOURCE][BILL_TO] WARNING missing fields: ' . implode( ', ', $missing ) . ' (context=' . ( $capture_context ? 'capture' : 'payment' ) . ')' );
 	}
 
 	$bill_to = array(
-		'firstName'          => $first,
-		'lastName'           => $last,
+		'firstName'          => $first ?: 'Donor',
+		'lastName'           => $last ?: 'Donor',
 		'address1'           => $address1 ?: '1 Main Street',
-		'locality'           => $city ?: 'City',
+		'locality'           => $city ?: 'Nairobi',
 		'administrativeArea' => $state,
-		'postalCode'         => $postal ?: '00000',
-		'country'            => $country ?: 'US',
+		'postalCode'         => $postal ?: '00100',
+		'country'            => $country ?: 'KE',
 		'email'              => $email ?: 'donor@example.com',
-		'phoneNumber'        => $phone_digits,
+		'phoneNumber'        => $phone_digits ?: '0000000000',
 	);
 
 	if ( $capture_context ) {
 		$bill_to['buildingNumber'] = '1';
 	}
 
+	error_log( '[CYBERSOURCE][BILL_TO] Built: ' . wp_json_encode( $bill_to ) . ' context=' . ( $capture_context ? 'capture' : 'payment' ) );
 	return $bill_to;
 }
 
@@ -622,13 +698,18 @@ function boniface_cybersource_ajax_capture_context() {
 	$name     = isset( $_POST['name'] ) ? sanitize_text_field( wp_unslash( $_POST['name'] ) ) : '';
 	$email    = isset( $_POST['email'] ) ? sanitize_email( wp_unslash( $_POST['email'] ) ) : '';
 
+	error_log( '[CYBERSOURCE][AJAX] capture_context called: amount=' . $amount . ' currency=' . $currency . ' origin=' . $origin . ' name=' . $name . ' email=' . $email );
+
 	$bill_to = boniface_cybersource_build_bill_to( $name, $email, true );
 
 	$result = boniface_cybersource_get_capture_context( $amount, $currency, $origin, $bill_to );
 	if ( ! $result['success'] ) {
-		error_log( '[CYBERSOURCE] Capture context failed: ' . ( $result['error'] ?? 'unknown' ) );
+		error_log( '[CYBERSOURCE][AJAX] Capture context FAILED: ' . ( isset( $result['error'] ) ? $result['error'] : 'unknown' ) );
+	} else {
+		error_log( '[CYBERSOURCE][AJAX] Capture context OK, jwt_len=' . strlen( isset( $result['capture_context'] ) ? $result['capture_context'] : '' ) );
 	}
 	wp_send_json( $result );
+	return;
 }
 
 /**
@@ -650,8 +731,17 @@ function boniface_cybersource_ajax_process_payment() {
 		$email    = isset( $_POST['email'] ) ? sanitize_email( wp_unslash( $_POST['email'] ) ) : '';
 		$phone    = isset( $_POST['phone'] ) ? sanitize_text_field( wp_unslash( $_POST['phone'] ) ) : '';
 
-		if ( ! $token || $amount < 10 ) {
-			wp_send_json( array( 'success' => false, 'error' => 'Invalid request.' ) );
+		error_log( '[CYBERSOURCE][AJAX] process_payment called: amount=' . $amount . ' currency=' . $currency . ' token_len=' . strlen( $token ) . ' name=' . $name . ' email=' . $email );
+
+		if ( ! $token ) {
+			error_log( '[CYBERSOURCE][AJAX] REJECTED: missing transient token' );
+			wp_send_json( array( 'success' => false, 'error' => 'Missing payment token. Please try again.' ) );
+			return;
+		}
+		if ( $amount < 10 ) {
+			error_log( '[CYBERSOURCE][AJAX] REJECTED: amount too low (' . $amount . ')' );
+			wp_send_json( array( 'success' => false, 'error' => 'Minimum donation is $10.' ) );
+			return;
 		}
 
 		$bill_to = boniface_cybersource_build_bill_to( $name, $email, false );
@@ -659,7 +749,9 @@ function boniface_cybersource_ajax_process_payment() {
 		$result = boniface_cybersource_process_payment( $token, $amount, $currency, $bill_to );
 
 		if ( ! $result['success'] ) {
-			error_log( '[CYBERSOURCE] Payment failed: ' . ( $result['error'] ?? 'unknown' ) . ' reason=' . ( $result['reason_code'] ?? '' ) );
+			error_log( '[CYBERSOURCE][AJAX] Payment FAILED: ' . ( isset( $result['error'] ) ? $result['error'] : 'unknown' ) . ' reason=' . ( isset( $result['reason_code'] ) ? $result['reason_code'] : '' ) . ' correlation=' . ( isset( $result['correlation_id'] ) ? $result['correlation_id'] : '' ) );
+		} else {
+			error_log( '[CYBERSOURCE][AJAX] Payment SUCCESS id=' . ( isset( $result['id'] ) ? $result['id'] : '' ) );
 		}
 
 		if ( $result['success'] ) {
@@ -682,13 +774,16 @@ function boniface_cybersource_ajax_process_payment() {
 		}
 
 		wp_send_json( $result );
+		return;
 
 	} catch ( Exception $e ) {
-		error_log( '[CYBERSOURCE] Payment exception: ' . $e->getMessage() );
+		error_log( '[CYBERSOURCE][AJAX] Payment exception: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine() );
 		wp_send_json( array( 'success' => false, 'error' => 'Server error: ' . $e->getMessage() ) );
+		return;
 	} catch ( Error $e ) {
-		error_log( '[CYBERSOURCE] Payment fatal: ' . $e->getMessage() );
+		error_log( '[CYBERSOURCE][AJAX] Payment fatal: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine() );
 		wp_send_json( array( 'success' => false, 'error' => 'Fatal error: ' . $e->getMessage() ) );
+		return;
 	}
 }
 

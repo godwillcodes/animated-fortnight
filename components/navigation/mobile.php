@@ -110,7 +110,7 @@
                         </svg>
                     </button>
                     <span class="text-base font-semibold"
-                        x-text="submenu.charAt(0).toUpperCase() + submenu.slice(1)"></span>
+                        x-text="submenu ? submenu.charAt(0).toUpperCase() + submenu.slice(1) : ''"></span>
                     <button @click="open = false" class="text-white hover:text-gray-300 focus:outline-none">
                         <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />

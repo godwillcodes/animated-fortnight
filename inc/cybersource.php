@@ -29,6 +29,96 @@ function boniface_cybersource_config() {
 }
 
 /**
+ * Decode JWT payload (middle part) without verifying signature.
+ * Used for diagnostic logging of capture context and transient tokens.
+ *
+ * @param string $jwt Raw JWT string.
+ * @return array|null Decoded payload or null on failure.
+ */
+function boniface_cybersource_decode_jwt_payload( $jwt ) {
+	if ( empty( $jwt ) || ! is_string( $jwt ) ) {
+		return null;
+	}
+	$parts = explode( '.', $jwt );
+	if ( count( $parts ) < 2 ) {
+		return null;
+	}
+	$b64 = $parts[1];
+	$b64 = strtr( $b64, '-_', '+/' );
+	$json = base64_decode( $b64, true );
+	if ( $json === false ) {
+		return null;
+	}
+	$payload = json_decode( $json, true );
+	return is_array( $payload ) ? $payload : null;
+}
+
+/**
+ * Log merchant ID verification for CyberSource support.
+ * Call before each API request to confirm no mismatch.
+ *
+ * @param array  $config Config from boniface_cybersource_config().
+ * @param array  $headers Headers being sent (to verify v-c-merchant-id).
+ * @param string $context Label e.g. 'CAPTURE_CTX' or 'PAYMENT'.
+ * @param string $jwt Optional JWT to decode and check for embedded merchant info.
+ */
+function boniface_cybersource_log_merchant_verification( $config, $headers, $context, $jwt = '' ) {
+	$expected_mid = $config ? $config['merchant_id'] : '(no config)';
+	$expected_kid = $config ? $config['key_id'] : '(no config)';
+	$header_mid   = isset( $headers['v-c-merchant-id'] ) ? $headers['v-c-merchant-id'] : 'MISSING';
+	$sig_header   = isset( $headers['Signature'] ) ? $headers['Signature'] : 'MISSING';
+
+	$mid_match = ( $header_mid === $expected_mid ) ? 'OK' : 'MISMATCH';
+	$kid_in_sig = ( strpos( $sig_header, 'keyid="' . $expected_kid . '"' ) !== false ) ? 'OK' : 'MISMATCH';
+
+	error_log( '[CYBERSOURCE][' . $context . '] === MERCHANT VERIFICATION ===' );
+	error_log( '[CYBERSOURCE][' . $context . '] Expected merchant_id: ' . $expected_mid );
+	error_log( '[CYBERSOURCE][' . $context . '] Expected key_id: ' . $expected_kid );
+	error_log( '[CYBERSOURCE][' . $context . '] v-c-merchant-id in headers: ' . $header_mid . ' [' . $mid_match . ']' );
+	error_log( '[CYBERSOURCE][' . $context . '] keyid in Signature: ' . $kid_in_sig );
+
+	if ( $mid_match !== 'OK' || $kid_in_sig !== 'OK' ) {
+		error_log( '[CYBERSOURCE][' . $context . '] *** MISMATCH DETECTED - Check wp-config / Customizer / filter ***' );
+	}
+
+	if ( ! empty( $jwt ) ) {
+		$payload = boniface_cybersource_decode_jwt_payload( $jwt );
+		if ( $payload ) {
+			$jwt_mid = '';
+			foreach ( array( 'merchantID', 'merchantId', 'merchant_id', 'mid', 'm' ) as $key ) {
+				if ( isset( $payload[ $key ] ) && is_string( $payload[ $key ] ) ) {
+					$jwt_mid = $payload[ $key ];
+					break;
+				}
+			}
+			if ( $jwt_mid === '' && isset( $payload['flex'] ) && is_array( $payload['flex'] ) ) {
+				foreach ( array( 'merchantID', 'merchantId', 'merchant_id', 'mid' ) as $key ) {
+					if ( isset( $payload['flex'][ $key ] ) && is_string( $payload['flex'][ $key ] ) ) {
+						$jwt_mid = $payload['flex'][ $key ];
+						break;
+					}
+				}
+			}
+			if ( $jwt_mid === '' && isset( $payload['jti'] ) ) {
+				error_log( '[CYBERSOURCE][' . $context . '] JWT jti (token id): ' . substr( (string) $payload['jti'], 0, 40 ) . '...' );
+			}
+			if ( $jwt_mid !== '' ) {
+				$jwt_match = ( $jwt_mid === $expected_mid ) ? 'OK' : 'MISMATCH';
+				error_log( '[CYBERSOURCE][' . $context . '] JWT embedded merchant: ' . $jwt_mid . ' [' . $jwt_match . ']' );
+				if ( $jwt_match !== 'OK' ) {
+					error_log( '[CYBERSOURCE][' . $context . '] *** JWT MERCHANT MISMATCH - Token created with different merchant ***' );
+				}
+			} else {
+				error_log( '[CYBERSOURCE][' . $context . '] JWT payload keys (no merchant field found): ' . implode( ', ', array_keys( $payload ) ) );
+			}
+		} else {
+			error_log( '[CYBERSOURCE][' . $context . '] JWT decode failed' );
+		}
+	}
+	error_log( '[CYBERSOURCE][' . $context . '] === END MERCHANT VERIFICATION ===' );
+}
+
+/**
  * Get CyberSource API base URL for the configured environment.
  *
  * @return string
@@ -281,8 +371,7 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 	$body    = wp_json_encode( $payload );
 	$headers = boniface_cybersource_signature_headers( 'POST', $resource, $body );
 
-	error_log( '[CYBERSOURCE][CAPTURE_CTX] v-c-merchant-id header: ' . ( isset( $headers['v-c-merchant-id'] ) ? '"' . $headers['v-c-merchant-id'] . '"' : 'MISSING!' ) );
-	error_log( '[CYBERSOURCE][CAPTURE_CTX] Signature header keyid check: ' . ( isset( $headers['Signature'] ) ? substr( $headers['Signature'], 0, 80 ) : 'MISSING!' ) );
+	boniface_cybersource_log_merchant_verification( $config, $headers, 'CAPTURE_CTX', '' );
 	error_log( '[CYBERSOURCE][CAPTURE_CTX] billTo: ' . wp_json_encode( $bill_to ) );
 	error_log( '[CYBERSOURCE][CAPTURE_CTX] URL: ' . $base_url . $resource );
 
@@ -301,6 +390,10 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 	}
 
 	error_log( '[CYBERSOURCE][CAPTURE_CTX] HTTP ' . $code . ' response: ' . substr( $body_response, 0, 300 ) );
+
+	if ( ( $code === 200 || $code === 201 ) && strpos( trim( $body_response ), 'eyJ' ) === 0 ) {
+		boniface_cybersource_log_merchant_verification( $config, $headers, 'CAPTURE_CTX_RESPONSE_JWT', trim( $body_response ) );
+	}
 
 	if ( $code !== 200 && $code !== 201 ) {
 		return array(
@@ -445,8 +538,7 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 	$body    = wp_json_encode( $payload );
 	$headers = boniface_cybersource_signature_headers( 'POST', $resource, $body );
 
-	error_log( '[CYBERSOURCE][PAYMENT] v-c-merchant-id header: ' . ( isset( $headers['v-c-merchant-id'] ) ? '"' . $headers['v-c-merchant-id'] . '"' : 'MISSING!' ) );
-	error_log( '[CYBERSOURCE][PAYMENT] Signature keyid: ' . ( isset( $headers['Signature'] ) ? substr( $headers['Signature'], 0, 80 ) : 'MISSING!' ) );
+	boniface_cybersource_log_merchant_verification( $config, $headers, 'PAYMENT', $transient_token_jwt );
 	error_log( '[CYBERSOURCE][PAYMENT] billTo: ' . wp_json_encode( $bill_to ) );
 	error_log( '[CYBERSOURCE][PAYMENT] amount=' . $total_amount . ' currency=' . $currency . ' URL=' . $base_url . $resource );
 
@@ -523,17 +615,18 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
  *
  * @param string $name  Full name from form.
  * @param string $email Email from form.
- * @param bool   $include_building Whether to include buildingNumber (Capture Context requires it, Payments API rejects it).
+ * @param bool   $capture_context True for Capture Context (includes buildingNumber + phoneNumber),
+ *                                false for Payments API (excludes both — they cause SYSTEM_ERROR).
  * @return array CyberSource-compatible billTo.
  */
-function boniface_cybersource_build_bill_to( $name, $email, $include_building = false ) {
+function boniface_cybersource_build_bill_to( $name, $email, $capture_context = false ) {
 	$country  = isset( $_POST['billing_country'] ) ? strtoupper( sanitize_text_field( wp_unslash( $_POST['billing_country'] ) ) ) : 'US';
 	$address1 = isset( $_POST['billing_address'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_address'] ) ) : '';
 	$city     = isset( $_POST['billing_city'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_city'] ) ) : '';
 	$state    = isset( $_POST['billing_state'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_state'] ) ) : '';
 	$postal   = isset( $_POST['billing_postal'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_postal'] ) ) : '';
+	$phone    = isset( $_POST['phone'] ) ? sanitize_text_field( wp_unslash( $_POST['phone'] ) ) : '';
 
-	// Normalize region codes
 	if ( ! empty( $state ) ) {
 		$state = boniface_cybersource_normalize_region( $state, $country );
 	}
@@ -546,24 +639,30 @@ function boniface_cybersource_build_bill_to( $name, $email, $include_building = 
 		$last  = isset( $parts[1] ) ? $parts[1] : $parts[0];
 	}
 
-	$bill_to = array(
-		'firstName'  => $first,
-		'lastName'   => $last,
-		'email'      => $email ?: 'donor@example.com',
-		'address1'   => $address1 ?: '1 Main Street',
-		'locality'   => $city ?: 'City',
-		'postalCode' => $postal ?: '00000',
-		'country'    => $country ?: 'US',
-	);
-
-	if ( $include_building ) {
-		$bill_to['buildingNumber'] = '1';
+	if ( empty( $state ) ) {
+		$state = $city ?: 'NA';
 	}
 
-	// Only include administrativeArea for countries where CyberSource expects it
-	$countries_with_admin = array( 'US', 'CA', 'AU', 'GB', 'IN', 'BR', 'MX', 'CN', 'JP' );
-	if ( in_array( $country, $countries_with_admin, true ) && ! empty( $state ) ) {
-		$bill_to['administrativeArea'] = $state;
+	$bill_to = array(
+		'firstName'          => $first,
+		'lastName'           => $last,
+		'email'              => $email ?: 'donor@example.com',
+		'address1'           => $address1 ?: '1 Main Street',
+		'locality'           => $city ?: 'City',
+		'administrativeArea' => $state,
+		'postalCode'         => $postal ?: '00000',
+		'country'            => $country ?: 'US',
+	);
+
+	// Capture Context needs buildingNumber + phoneNumber;
+	// Payments API rejects both (causes SYSTEM_ERROR).
+	if ( $capture_context ) {
+		$bill_to['buildingNumber'] = '1';
+		$phone_digits = preg_replace( '/[^0-9]/', '', $phone );
+		if ( strlen( $phone_digits ) < 7 ) {
+			$phone_digits = '0000000000';
+		}
+		$bill_to['phoneNumber'] = $phone_digits;
 	}
 
 	return $bill_to;

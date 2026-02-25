@@ -185,16 +185,12 @@
 		});
 	}
 
-	/* ── Unified Checkout runner (completeMandate) ────────── */
+	/* ── Unified Checkout runner (completeMandate, sidebar) ── */
 
 	function runUnifiedCheckout(captureContext, clientLibrary, clientLibraryIntegrity) {
 		clearPaymentStepError();
-		var sel = document.getElementById('buttonPaymentListContainer');
-		var screen = document.getElementById('embeddedPaymentContainer');
-		if (sel) sel.innerHTML = '';
-		if (screen) screen.innerHTML = '';
 
-		console.log('[CYBERSOURCE] Running Unified Checkout (completeMandate)...', {
+		console.log('[CYBERSOURCE] Running Unified Checkout (completeMandate, sidebar mode)...', {
 			captureContextLength: captureContext ? captureContext.length : 0,
 			clientLibrary: clientLibrary,
 			hasIntegrity: !!clientLibraryIntegrity
@@ -210,49 +206,13 @@
 			})
 			.then(function (accept) {
 				ucAccept = accept;
-				console.log('[CYBERSOURCE] Accept() returned, calling unifiedPayments()...');
+				console.log('[CYBERSOURCE] Accept() returned, calling unifiedPayments() in sidebar mode...');
 				return accept.unifiedPayments();
 			})
 			.then(function (up) {
-				console.log('[CYBERSOURCE] unifiedPayments() returned, calling show()...');
-				return new Promise(function (resolve, reject) {
-					var resolved = false;
-					function done(v) {
-						if (!resolved) {
-							resolved = true;
-							clearTimeout(tid);
-							$('#donation-payment-skeleton').addClass('hidden');
-							console.log('[CYBERSOURCE] up.show() resolved:', typeof v, v);
-							resolve(v);
-						}
-					}
-					function fail(e) {
-						if (!resolved) {
-							resolved = true;
-							clearTimeout(tid);
-							$('#donation-payment-skeleton').addClass('hidden');
-							console.error('[CYBERSOURCE] up.show() failed:', e);
-							reject(e);
-						}
-					}
-					var tid = setTimeout(function () {
-						var has = (sel && (sel.querySelector('iframe') || sel.children.length)) ||
-								  (screen && (screen.querySelector('iframe') || screen.children.length));
-						if (!has) fail(new Error('Payment form did not load within 8 seconds. Please refresh and try again.'));
-						else {
-							console.log('[CYBERSOURCE] Payment form containers populated.');
-							$('#donation-payment-skeleton').addClass('hidden');
-						}
-					}, 8000);
-					setTimeout(function () {
-						up.show({ containers: { paymentSelection: '#buttonPaymentListContainer', paymentScreen: '#embeddedPaymentContainer' } })
-							.then(done)
-							.catch(function (err) {
-								console.error('[CYBERSOURCE] up.show() error:', err);
-								fail(new Error((err && err.message) || 'Payment could not be processed.'));
-							});
-					}, 150);
-				});
+				console.log('[CYBERSOURCE] unifiedPayments() returned, calling show() (no containers — sidebar overlay)...');
+				$('#donation-payment-skeleton').addClass('hidden');
+				return up.show();
 			});
 	}
 

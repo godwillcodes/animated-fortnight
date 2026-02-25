@@ -94,28 +94,23 @@
     </div>
 
     <!-- ============================================================ -->
-    <!-- Step 2: Payment (CyberSource widget — billing + card + pay)  -->
+    <!-- Step 2: Payment (CyberSource sidebar overlay handles everything) -->
     <!-- ============================================================ -->
     <div id="donation-payment-step" class="donation-form-step donation-step-hidden hidden space-y-6">
         <div class="flex items-center justify-between gap-4">
-            <p class="text-sm font-medium text-neutral-700">Complete your donation below.</p>
+            <p class="text-sm font-medium text-neutral-700">Complete your donation in the payment window.</p>
             <button type="button" id="donation-back-to-details" class="text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors flex items-center gap-1.5" aria-label="Back to details">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
                 Back
             </button>
         </div>
-        <p class="text-sm text-neutral-500">Billing address, card details, and payment are handled securely by CyberSource.</p>
         <div id="donation-payment-error" class="hidden rounded-xl border-2 border-red-200 bg-red-50 p-4 text-red-800 text-sm font-medium"></div>
-        <!-- Skeleton overlay while UC loads -->
-        <div class="relative min-h-[360px]">
-            <div id="donation-payment-skeleton" class="absolute inset-0 z-10 flex flex-col gap-4 pointer-events-none">
-                <div class="donation-skeleton h-20 w-full flex-0"></div>
-                <div class="donation-skeleton h-72 w-full flex-1 min-h-[280px]"></div>
+        <div class="text-center py-12">
+            <div id="donation-payment-skeleton" class="inline-flex flex-col items-center gap-4">
+                <div class="w-10 h-10 border-4 border-neutral-200 border-t-neutral-900 rounded-full animate-spin"></div>
+                <p class="text-sm text-neutral-500">Opening secure payment window…</p>
             </div>
-            <div class="relative z-0 space-y-4">
-                <div id="buttonPaymentListContainer" class="min-h-[80px] rounded-xl border-2 border-neutral-200 bg-neutral-50/50 p-4"></div>
-                <div id="embeddedPaymentContainer" class="min-h-[280px] rounded-xl border-2 border-neutral-200 bg-white"></div>
-            </div>
+            <p class="text-sm text-neutral-500 mt-4">Billing address, card details, and payment are handled securely by CyberSource.</p>
         </div>
     </div>
 

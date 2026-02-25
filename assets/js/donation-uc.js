@@ -1,6 +1,6 @@
 /**
- * CyberSource Unified Checkout – donation form integration.
- * 3-step flow: Details → Billing Address → Payment.
+ * CyberSource Unified Checkout – donation form (completeMandate mode).
+ * 2-step flow: Details → Payment (UC widget handles billing + card + payment).
  */
 (function ($) {
 	'use strict';
@@ -13,7 +13,7 @@
 
 	if (!$form.length) return;
 
-	console.log('[CYBERSOURCE] Donation form initialized', {
+	console.log('[CYBERSOURCE] Donation form initialized (completeMandate mode)', {
 		ajaxUrl: config.ajaxUrl ? 'SET' : 'MISSING',
 		nonce: config.nonce ? 'SET' : 'MISSING',
 		origin: config.origin || window.location.origin,
@@ -46,17 +46,16 @@
 	}
 
 	function showDetailsStep()  { showStep($('#donation-details-step'), 1); }
-	function showBillingStep()  { showStep($('#donation-billing-step'), 2); }
 	function showPaymentStep()  {
-		showStep($('#donation-payment-step'), 3);
+		showStep($('#donation-payment-step'), 2);
 		$('#donation-payment-skeleton').removeClass('hidden');
 	}
 	function showSuccessStep(msg) {
-		showStep($('#donation-success-step'), 3);
+		showStep($('#donation-success-step'), 2);
 		$('#donation-success-step .success-message').text(msg || 'Thank you. Your donation has been processed.');
 	}
 	function showErrorStep(msg) {
-		showStep($('#donation-error-step'), 3);
+		showStep($('#donation-error-step'), 2);
 		$('#donation-error-step .error-message').text(msg || 'Something went wrong.');
 	}
 
@@ -65,7 +64,7 @@
 	function setSubmitState(loading) {
 		var $btn = $('#donate-submit');
 		$btn.prop('disabled', !!loading).toggleClass('is-loading', !!loading);
-		$btn.find('.donate-btn-text').text(loading ? 'Preparing…' : 'Proceed to payment');
+		$btn.find('.donate-btn-text').text(loading ? 'Preparing payment…' : 'Continue to payment');
 		$btn.find('.donate-btn-icon').toggleClass('hidden', !!loading);
 	}
 
@@ -93,37 +92,23 @@
 		return null;
 	}
 
-	function validateBillingStep() {
-		if (!$('#billing-country').val()) { $('#billing-country').focus(); return 'Please select your country.'; }
-		if (!$('#billing-address').val().trim()) { $('#billing-address').focus(); return 'Please enter your street address.'; }
-		if (!$('#billing-city').val().trim()) { $('#billing-city').focus(); return 'Please enter your city.'; }
-		if (!$('#billing-postal').val().trim()) { $('#billing-postal').focus(); return 'Please enter your postal / ZIP code.'; }
-		return null;
-	}
+	/* ── Error helpers ────────────────────────────────────── */
 
-	function showBillingError(msg) {
-		$('#billing-error').removeClass('hidden').text(msg);
+	function showFormError(msg) {
+		if (!$('#step1-error').length) {
+			$('#donate-submit').closest('.pt-2').before('<div id="step1-error" class="rounded-xl border-2 border-red-200 bg-red-50 p-4 text-red-800 text-sm font-medium hidden"></div>');
+		}
+		$('#step1-error').text(msg).removeClass('hidden');
 	}
-	function clearBillingError() {
-		$('#billing-error').addClass('hidden').text('');
+	function clearFormError() {
+		$('#step1-error').addClass('hidden').text('');
 	}
-
-	/* ── Collect billing data ─────────────────────────────── */
-
-	function getBillingData() {
-		return {
-			country:  $('#billing-country').val(),
-			address1: $('#billing-address').val().trim(),
-			city:     $('#billing-city').val().trim(),
-			state:    $('#billing-state').val().trim(),
-			postal:   $('#billing-postal').val().trim()
-		};
-	}
+	function clearPaymentStepError() { $('#donation-payment-error').addClass('hidden').empty(); }
+	function showPaymentStepError(msg) { $('#donation-payment-error').removeClass('hidden').text(msg || 'Something went wrong.'); }
 
 	/* ── CyberSource API calls ────────────────────────────── */
 
 	function getCaptureContext() {
-		var billing = getBillingData();
 		var data = {
 			action: 'boniface_cybersource_capture_context',
 			nonce: config.nonce,
@@ -132,19 +117,14 @@
 			origin: window.location.origin,
 			name: $('#name').val(),
 			email: $('#email').val(),
-			phone: $('#phone').val(),
-			billing_country:  billing.country,
-			billing_address:  billing.address1,
-			billing_city:     billing.city,
-			billing_state:    billing.state,
-			billing_postal:   billing.postal
+			phone: $('#phone').val()
 		};
-		console.log('[CYBERSOURCE] Requesting capture context...', {
+		console.log('[CYBERSOURCE] Requesting capture context (completeMandate)...', {
 			amount: data.amount,
 			currency: data.currency,
 			origin: data.origin,
-			country: data.billing_country,
-			city: data.billing_city
+			name: data.name,
+			email: data.email
 		});
 		var startTime = Date.now();
 		return $.ajax({
@@ -157,50 +137,29 @@
 				hasJwt: !!(res.capture_context),
 				jwtLength: res.capture_context ? res.capture_context.length : 0,
 				hasClientLib: !!(res.client_library),
-				clientLib: res.client_library || 'MISSING',
 				error: res.error || null
 			});
 			return res;
 		});
 	}
 
-	function processPayment(transientToken) {
-		var billing = getBillingData();
-		var data = {
-			action: 'boniface_cybersource_process_payment',
-			nonce: config.nonce,
-			transient_token: transientToken,
-			amount: parseFloat($('#amount').val()) || 0,
-			currency: 'USD',
-			name: $('#name').val(),
-			email: $('#email').val(),
-			phone: $('#phone').val(),
-			message: $('#message').val(),
-			billing_country:  billing.country,
-			billing_address:  billing.address1,
-			billing_city:     billing.city,
-			billing_state:    billing.state,
-			billing_postal:   billing.postal
-		};
-		console.log('[CYBERSOURCE] Sending payment request...', {
-			amount: data.amount,
-			currency: data.currency,
-			tokenLength: transientToken ? transientToken.length : 0,
-			tokenParts: transientToken ? transientToken.split('.').length : 0,
-			tokenFirst50: transientToken ? transientToken.substring(0, 50) + '...' : 'MISSING',
-			country: data.billing_country,
-			name: data.name,
-			email: data.email
-		});
-		var startTime = Date.now();
+	function recordPayment(result) {
 		return $.ajax({
 			url: config.ajaxUrl,
 			type: 'POST',
-			timeout: 60000,
-			data: data
-		}).then(function (res) {
-			console.log('[CYBERSOURCE] Payment response in ' + (Date.now() - startTime) + 'ms', res);
-			return res;
+			data: {
+				action: 'boniface_cybersource_record_payment',
+				nonce: config.nonce,
+				name: $('#name').val(),
+				email: $('#email').val(),
+				phone: $('#phone').val(),
+				amount: parseFloat($('#amount').val()) || 0,
+				currency: 'USD',
+				message: $('#message').val(),
+				payment_id: (result && result.id) || '',
+				payment_status: (result && result.status) || 'UNKNOWN',
+				raw_result: JSON.stringify(result || {})
+			}
 		});
 	}
 
@@ -226,12 +185,7 @@
 		});
 	}
 
-	/* ── Payment error helpers ────────────────────────────── */
-
-	function clearPaymentStepError() { $('#donation-payment-error').addClass('hidden').empty(); }
-	function showPaymentStepError(msg) { $('#donation-payment-error').removeClass('hidden').text(msg || 'Something went wrong.'); }
-
-	/* ── Unified Checkout runner ──────────────────────────── */
+	/* ── Unified Checkout runner (completeMandate) ────────── */
 
 	function runUnifiedCheckout(captureContext, clientLibrary, clientLibraryIntegrity) {
 		clearPaymentStepError();
@@ -240,7 +194,7 @@
 		if (sel) sel.innerHTML = '';
 		if (screen) screen.innerHTML = '';
 
-		console.log('[CYBERSOURCE] Running Unified Checkout...', {
+		console.log('[CYBERSOURCE] Running Unified Checkout (completeMandate)...', {
 			captureContextLength: captureContext ? captureContext.length : 0,
 			clientLibrary: clientLibrary,
 			hasIntegrity: !!clientLibraryIntegrity
@@ -248,16 +202,16 @@
 
 		return loadScript(clientLibrary, clientLibraryIntegrity || '')
 			.then(function () {
-				if (typeof window.Accept !== 'function') throw new Error('Payment library did not load correctly (Accept not a function).');
+				if (typeof window.Accept !== 'function') throw new Error('Payment library did not load correctly.');
 				var jwt = (typeof captureContext === 'string') ? captureContext.trim() : '';
-				if (!jwt || jwt.split('.').length !== 3) throw new Error('Invalid capture context (not a valid JWT).');
+				if (!jwt || jwt.split('.').length !== 3) throw new Error('Invalid capture context.');
 				console.log('[CYBERSOURCE] Calling Accept() with JWT...');
 				return window.Accept(jwt);
 			})
 			.then(function (accept) {
 				ucAccept = accept;
 				console.log('[CYBERSOURCE] Accept() returned, calling unifiedPayments()...');
-				return accept.unifiedPayments(false);
+				return accept.unifiedPayments();
 			})
 			.then(function (up) {
 				console.log('[CYBERSOURCE] unifiedPayments() returned, calling show()...');
@@ -268,7 +222,7 @@
 							resolved = true;
 							clearTimeout(tid);
 							$('#donation-payment-skeleton').addClass('hidden');
-							console.log('[CYBERSOURCE] up.show() resolved with token:', v ? (typeof v === 'string' ? v.substring(0, 60) + '...' : typeof v) : 'EMPTY');
+							console.log('[CYBERSOURCE] up.show() resolved:', typeof v, v);
 							resolve(v);
 						}
 					}
@@ -284,41 +238,25 @@
 					var tid = setTimeout(function () {
 						var has = (sel && (sel.querySelector('iframe') || sel.children.length)) ||
 								  (screen && (screen.querySelector('iframe') || screen.children.length));
-						if (!has) fail(new Error('Payment form did not load within 5 seconds. Please refresh and try again.'));
+						if (!has) fail(new Error('Payment form did not load within 8 seconds. Please refresh and try again.'));
 						else {
-							console.log('[CYBERSOURCE] Payment form containers populated (iframes loaded).');
+							console.log('[CYBERSOURCE] Payment form containers populated.');
 							$('#donation-payment-skeleton').addClass('hidden');
 						}
-					}, 5000);
+					}, 8000);
 					setTimeout(function () {
 						up.show({ containers: { paymentSelection: '#buttonPaymentListContainer', paymentScreen: '#embeddedPaymentContainer' } })
 							.then(done)
 							.catch(function (err) {
 								console.error('[CYBERSOURCE] up.show() error:', err);
-								fail(new Error((err && err.message) || 'Payment form could not be loaded.'));
+								fail(new Error((err && err.message) || 'Payment could not be processed.'));
 							});
 					}, 150);
 				});
 			});
 	}
 
-	/* ── Step 1 → Step 2: "Continue to billing" button ────── */
-
-	$('#to-billing-step').on('click', function () {
-		var err = validateDetailsStep();
-		if (err) {
-			if (!$('#step1-error').length) {
-				$('#to-billing-step').before('<p id="step1-error" class="text-red-600 text-sm mb-3 hidden"></p>');
-			}
-			$('#step1-error').text(err).removeClass('hidden');
-			return;
-		}
-		$('#step1-error').addClass('hidden');
-		console.log('[CYBERSOURCE] Step 1 validated, moving to billing step.');
-		showBillingStep();
-	});
-
-	/* ── Step 2 → Step 3: Form submit ─────────────────────── */
+	/* ── Form submit → UC widget ──────────────────────────── */
 
 	$form.on('submit', function (e) {
 		e.preventDefault();
@@ -328,84 +266,87 @@
 			return;
 		}
 
-		clearBillingError();
+		clearFormError();
 
-		var err = validateBillingStep();
-		if (err) { showBillingError(err); return; }
+		var err = validateDetailsStep();
+		if (err) { showFormError(err); return; }
 
 		isSubmitting = true;
 		setSubmitState(true);
-		console.log('[CYBERSOURCE] === PAYMENT FLOW STARTED ===');
+		console.log('[CYBERSOURCE] === PAYMENT FLOW STARTED (completeMandate) ===');
 		console.log('[CYBERSOURCE] Form data:', {
 			amount: $('#amount').val(),
 			name: $('#name').val(),
 			email: $('#email').val(),
-			phone: $('#phone').val(),
-			billing: getBillingData()
+			phone: $('#phone').val()
 		});
 
 		getCaptureContext()
 			.then(function (res) {
-				if (!res.success) throw new Error(res.error || 'Could not start payment');
-				if (!res.client_library) throw new Error('Payment form could not be loaded (no client library). Please refresh.');
+				if (!res.success) throw new Error(res.error || 'Could not start payment.');
+				if (!res.client_library) throw new Error('Payment form could not be loaded. Please refresh.');
 				showPaymentStep();
 				setSubmitState(false);
 				var ctx = (res.capture_context || '').trim();
-				if (!ctx || ctx.split('.').length !== 3) throw new Error('Invalid capture context (bad JWT). Please refresh.');
+				if (!ctx || ctx.split('.').length !== 3) throw new Error('Invalid capture context. Please refresh.');
 				return runUnifiedCheckout(ctx, res.client_library, res.client_library_integrity);
 			})
-			.then(function (transientToken) {
-				if (!transientToken) throw new Error('No payment token received from checkout widget.');
-				console.log('[CYBERSOURCE] === TRANSIENT TOKEN RECEIVED ===');
-				console.log('[CYBERSOURCE] Token type:', typeof transientToken);
-				console.log('[CYBERSOURCE] Token length:', transientToken.length);
-				console.log('[CYBERSOURCE] Token parts:', transientToken.split('.').length);
-				console.log('[CYBERSOURCE] Token (first 100):', transientToken.substring(0, 100));
-				console.log('[CYBERSOURCE] Full transient token (copy for Postman):', transientToken);
-				setSubmitState(true);
-				$('#donate-submit .donate-btn-text').text('Processing…');
-				return processPayment(transientToken);
-			})
-			.then(function (res) {
+			.then(function (result) {
+				console.log('[CYBERSOURCE] === completeMandate RESULT ===');
+				console.log('[CYBERSOURCE] Result type:', typeof result);
+				console.log('[CYBERSOURCE] Result value:', JSON.stringify(result, null, 2));
+
+				if (typeof result === 'string' && result.indexOf('eyJ') === 0) {
+					console.log('[CYBERSOURCE] Got transient token (completeMandate may have processed internally).');
+					console.log('[CYBERSOURCE] Token length:', result.length);
+				}
+
+				if (result && typeof result === 'object') {
+					console.log('[CYBERSOURCE] Result keys:', Object.keys(result));
+					if (result.paymentResponse) {
+						console.log('[CYBERSOURCE] paymentResponse:', result.paymentResponse);
+					}
+				}
+
+				recordPayment(result).always(function () {
+					console.log('[CYBERSOURCE] Payment recorded on server.');
+				});
+
 				isSubmitting = false;
 				setSubmitState(false);
-				if (res.success) {
-					console.log('[CYBERSOURCE] === PAYMENT SUCCESS ===', res);
-					showSuccessStep('Thank you. Your donation has been processed successfully.');
-				} else {
-					console.error('[CYBERSOURCE] === PAYMENT FAILED ===', res);
-					showErrorStep(res.error || 'Payment could not be completed.');
-				}
+				showSuccessStep('Thank you! Your donation has been processed successfully.');
 			})
 			.catch(function (err) {
 				isSubmitting = false;
 				setSubmitState(false);
 				console.error('[CYBERSOURCE] === PAYMENT FLOW ERROR ===', err);
-				var msg = (err && err.error) ? err.error : (err && err.message) ? err.message : 'Something went wrong.';
-				if (err && (err.status === 502 || err.status === 503 || err.status === 504)) {
-					msg = 'Payment failed (server ' + err.status + '). This is usually a CyberSource configuration issue. Please contact support.';
-				} else if (err && err.status === 0 && err.statusText === 'timeout') {
-					msg = 'Request timed out after 60 seconds. Please check your connection and try again.';
-				}
+
+				var msg = 'Something went wrong.';
+				if (err && err.error) msg = err.error;
+				else if (err && err.message) msg = err.message;
+
 				if (err && err.responseJSON) {
 					console.error('[CYBERSOURCE] Server response:', err.responseJSON);
 				}
-				if ($('#donation-payment-step').is(':visible')) showPaymentStepError(msg);
-				else showBillingError(msg);
+
+				if ($('#donation-payment-step').is(':visible')) {
+					showPaymentStepError(msg);
+				} else {
+					showFormError(msg);
+				}
 			});
 	});
 
 	/* ── Back / Retry buttons ─────────────────────────────── */
 
-	$('#billing-back-to-details').on('click', showDetailsStep);
-	$('#donation-back-to-billing').on('click', function () {
+	$('#donation-back-to-details').on('click', function () {
 		isSubmitting = false;
-		showBillingStep();
+		showDetailsStep();
 	});
 	$('#donation-retry-btn').on('click', function () {
-		console.log('[CYBERSOURCE] Retry clicked — resetting to billing step for fresh attempt.');
+		console.log('[CYBERSOURCE] Retry clicked — resetting to details step.');
 		isSubmitting = false;
-		showBillingStep();
+		showDetailsStep();
 	});
 
 	/* ── Preset amount buttons ────────────────────────────── */

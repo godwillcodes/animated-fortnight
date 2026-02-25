@@ -277,12 +277,21 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 
 	$client_ref = 'donation-' . substr( uniqid( '', true ), -8 );
 
+	$order_info = array(
+		'amountDetails' => array(
+			'totalAmount' => $total_amount,
+			'currency'    => $currency,
+		),
+	);
+	if ( ! empty( $bill_to ) ) {
+		$order_info['billTo'] = $bill_to;
+	}
+
 	$payload = array(
 		'targetOrigins'       => array( $origin ),
 		'clientVersion'       => '0.34',
-		'buttonType'          => 'DONATE',
-		'allowedCardNetworks' => array( 'VISA', 'MASTERCARD', 'AMEX' ),
-		'allowedPaymentTypes' => array( 'PANENTRY', 'CLICKTOPAY', 'APPLEPAY', 'GOOGLEPAY', 'PAZE' ),
+		'allowedCardNetworks' => array( 'VISA', 'MASTERCARD' ),
+		'allowedPaymentTypes' => array( 'PANENTRY', 'CLICKTOPAY', 'GOOGLEPAY' ),
 		'country'             => 'KE',
 		'locale'              => 'en_US',
 		'captureMandate'      => array(
@@ -291,34 +300,37 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 			'requestPhone'             => true,
 			'requestShipping'          => false,
 			'showAcceptedNetworkIcons' => true,
-			'showConfirmationStep'     => false,
 		),
-		'transientTokenResponseOptions' => array(
-			'includeCardPrefix' => true,
+		'completeMandate' => array(
+			'type'                     => 'CAPTURE',
+			'decisionManager'          => true,
+			'consumerAuthentication'    => true,
 		),
-		'data' => array(
-			'orderInformation' => array(
-				'billTo'       => $bill_to,
-				'amountDetails' => array(
-					'totalAmount' => $total_amount,
-					'currency'    => $currency,
-				),
-			),
-			'clientReferenceInformation' => array(
-				'code' => $client_ref,
-			),
-		),
+		'orderInformation' => $order_info,
 	);
 
 	$body    = wp_json_encode( $payload );
 	$headers = boniface_cybersource_signature_headers( 'POST', $resource, $body );
 
-	error_log( '[CYBERSOURCE][CAPTURE_CTX] === CAPTURE CONTEXT REQUEST ===' );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] === CAPTURE CONTEXT REQUEST (completeMandate) ===' );
 	error_log( '[CYBERSOURCE][CAPTURE_CTX] origin=' . $origin . ' amount=' . $total_amount . ' currency=' . $currency . ' ref=' . $client_ref );
-	error_log( '[CYBERSOURCE][CAPTURE_CTX] country=KE locale=en_US buttonType=DONATE' );
-	error_log( '[CYBERSOURCE][CAPTURE_CTX] billTo: ' . wp_json_encode( $bill_to ) );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] MODE: completeMandate type=CAPTURE (CyberSource processes payment in widget)' );
 	error_log( '[CYBERSOURCE][CAPTURE_CTX] payload_size=' . strlen( $body ) . ' bytes' );
 	boniface_cybersource_log_merchant_verification( $config, $headers, 'CAPTURE_CTX' );
+
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] === POSTMAN: COPY EVERYTHING BELOW ===' );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] POST ' . $base_url . $resource );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] --- HEADERS ---' );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] Content-Type: application/json' );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] v-c-merchant-id: ' . $headers['v-c-merchant-id'] );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] v-c-date: ' . $headers['v-c-date'] );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] Host: ' . $headers['Host'] );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] Digest: ' . ( isset( $headers['Digest'] ) ? $headers['Digest'] : '' ) );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] Signature: ' . $headers['Signature'] );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] --- FULL BODY (paste as raw JSON) ---' );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] ' . $body );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] --- END POSTMAN ---' );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] NOTE: Signature/Digest headers are time-sensitive. For Postman, use CyberSource auth with key_id=' . $config['key_id'] );
 
 	$response = wp_remote_post( $base_url . $resource, array(
 		'timeout' => 15,
@@ -491,8 +503,7 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 			'code' => $client_ref,
 		),
 		'processingInformation' => array(
-			'commerceIndicator' => 'internet',
-			'capture'           => true,
+			'capture' => true,
 		),
 		'tokenInformation' => array(
 			'transientTokenJwt' => $transient_token_jwt,
@@ -697,18 +708,79 @@ function boniface_cybersource_ajax_capture_context() {
 	$origin   = isset( $_POST['origin'] ) ? esc_url_raw( wp_unslash( $_POST['origin'] ) ) : '';
 	$name     = isset( $_POST['name'] ) ? sanitize_text_field( wp_unslash( $_POST['name'] ) ) : '';
 	$email    = isset( $_POST['email'] ) ? sanitize_email( wp_unslash( $_POST['email'] ) ) : '';
+	$phone    = isset( $_POST['phone'] ) ? sanitize_text_field( wp_unslash( $_POST['phone'] ) ) : '';
 
 	error_log( '[CYBERSOURCE][AJAX] capture_context called: amount=' . $amount . ' currency=' . $currency . ' origin=' . $origin . ' name=' . $name . ' email=' . $email );
 
-	$bill_to = boniface_cybersource_build_bill_to( $name, $email, true );
+	$bill_to = array();
+	if ( $name || $email ) {
+		$first = '';
+		$last  = '';
+		if ( $name ) {
+			$parts = preg_split( '/\s+/', trim( $name ), 2 );
+			$first = $parts[0];
+			$last  = isset( $parts[1] ) ? $parts[1] : $parts[0];
+		}
+		$phone_digits = preg_replace( '/[^0-9]/', '', $phone );
+
+		$bill_to = array(
+			'firstName'          => $first ?: 'Donor',
+			'lastName'           => $last ?: 'Donor',
+			'email'              => $email ?: 'donor@example.com',
+			'phoneNumber'        => strlen( $phone_digits ) >= 7 ? $phone_digits : '0000000000',
+			'address1'           => '1 Main Street',
+			'locality'           => 'Nairobi',
+			'administrativeArea' => 'Nairobi',
+			'postalCode'         => '00100',
+			'country'            => 'KE',
+			'buildingNumber'     => '1',
+		);
+		error_log( '[CYBERSOURCE][AJAX] billTo for capture context: ' . wp_json_encode( $bill_to ) );
+	}
 
 	$result = boniface_cybersource_get_capture_context( $amount, $currency, $origin, $bill_to );
 	if ( ! $result['success'] ) {
 		error_log( '[CYBERSOURCE][AJAX] Capture context FAILED: ' . ( isset( $result['error'] ) ? $result['error'] : 'unknown' ) );
 	} else {
-		error_log( '[CYBERSOURCE][AJAX] Capture context OK, jwt_len=' . strlen( isset( $result['capture_context'] ) ? $result['capture_context'] : '' ) );
+		error_log( '[CYBERSOURCE][AJAX] Capture context OK (completeMandate mode), jwt_len=' . strlen( isset( $result['capture_context'] ) ? $result['capture_context'] : '' ) );
 	}
 	wp_send_json( $result );
+	return;
+}
+
+/**
+ * AJAX: Record payment result from completeMandate (widget-processed payment).
+ */
+function boniface_cybersource_ajax_record_payment() {
+	check_ajax_referer( 'boniface_cybersource', 'nonce' );
+
+	$name       = isset( $_POST['name'] ) ? sanitize_text_field( wp_unslash( $_POST['name'] ) ) : '';
+	$email      = isset( $_POST['email'] ) ? sanitize_email( wp_unslash( $_POST['email'] ) ) : '';
+	$phone      = isset( $_POST['phone'] ) ? sanitize_text_field( wp_unslash( $_POST['phone'] ) ) : '';
+	$amount     = isset( $_POST['amount'] ) ? floatval( $_POST['amount'] ) : 0;
+	$currency   = isset( $_POST['currency'] ) ? sanitize_text_field( wp_unslash( $_POST['currency'] ) ) : 'USD';
+	$message    = isset( $_POST['message'] ) ? sanitize_textarea_field( wp_unslash( $_POST['message'] ) ) : '';
+	$payment_id = isset( $_POST['payment_id'] ) ? sanitize_text_field( wp_unslash( $_POST['payment_id'] ) ) : '';
+	$status     = isset( $_POST['payment_status'] ) ? sanitize_text_field( wp_unslash( $_POST['payment_status'] ) ) : '';
+	$raw_result = isset( $_POST['raw_result'] ) ? sanitize_textarea_field( wp_unslash( $_POST['raw_result'] ) ) : '';
+
+	error_log( '[CYBERSOURCE][RECORD] === completeMandate PAYMENT RESULT ===' );
+	error_log( '[CYBERSOURCE][RECORD] status=' . $status . ' payment_id=' . $payment_id );
+	error_log( '[CYBERSOURCE][RECORD] amount=' . $amount . ' currency=' . $currency );
+	error_log( '[CYBERSOURCE][RECORD] name=' . $name . ' email=' . $email . ' phone=' . $phone );
+	error_log( '[CYBERSOURCE][RECORD] raw_result=' . $raw_result );
+
+	do_action( 'boniface_donation_payment_success', array(
+		'amount'      => $amount,
+		'currency'    => $currency,
+		'name'        => $name,
+		'email'       => $email,
+		'phone'       => $phone,
+		'message'     => $message,
+		'payment_id'  => $payment_id,
+	) );
+
+	wp_send_json( array( 'success' => true, 'recorded' => true ) );
 	return;
 }
 
@@ -724,14 +796,20 @@ function boniface_cybersource_ajax_process_payment() {
 			@set_time_limit( 60 );
 		}
 
-		$token    = isset( $_POST['transient_token'] ) ? sanitize_text_field( wp_unslash( $_POST['transient_token'] ) ) : '';
-		$amount   = isset( $_POST['amount'] ) ? floatval( $_POST['amount'] ) : 0;
-		$currency = isset( $_POST['currency'] ) ? sanitize_text_field( wp_unslash( $_POST['currency'] ) ) : 'USD';
-		$name     = isset( $_POST['name'] ) ? sanitize_text_field( wp_unslash( $_POST['name'] ) ) : '';
-		$email    = isset( $_POST['email'] ) ? sanitize_email( wp_unslash( $_POST['email'] ) ) : '';
-		$phone    = isset( $_POST['phone'] ) ? sanitize_text_field( wp_unslash( $_POST['phone'] ) ) : '';
+		$raw_token = isset( $_POST['transient_token'] ) ? wp_unslash( $_POST['transient_token'] ) : '';
+		$token     = sanitize_text_field( $raw_token );
+		$amount    = isset( $_POST['amount'] ) ? floatval( $_POST['amount'] ) : 0;
+		$currency  = isset( $_POST['currency'] ) ? sanitize_text_field( wp_unslash( $_POST['currency'] ) ) : 'USD';
+		$name      = isset( $_POST['name'] ) ? sanitize_text_field( wp_unslash( $_POST['name'] ) ) : '';
+		$email     = isset( $_POST['email'] ) ? sanitize_email( wp_unslash( $_POST['email'] ) ) : '';
+		$phone     = isset( $_POST['phone'] ) ? sanitize_text_field( wp_unslash( $_POST['phone'] ) ) : '';
 
 		error_log( '[CYBERSOURCE][AJAX] process_payment called: amount=' . $amount . ' currency=' . $currency . ' token_len=' . strlen( $token ) . ' name=' . $name . ' email=' . $email );
+		if ( $raw_token !== $token ) {
+			error_log( '[CYBERSOURCE][AJAX] !!! TOKEN MODIFIED BY sanitize_text_field() !!! raw_len=' . strlen( $raw_token ) . ' sanitized_len=' . strlen( $token ) );
+			error_log( '[CYBERSOURCE][AJAX] Using RAW token instead to preserve integrity.' );
+			$token = $raw_token;
+		}
 
 		if ( ! $token ) {
 			error_log( '[CYBERSOURCE][AJAX] REJECTED: missing transient token' );
@@ -795,6 +873,8 @@ function boniface_cybersource_init() {
 	add_action( 'wp_ajax_nopriv_boniface_cybersource_capture_context', 'boniface_cybersource_ajax_capture_context' );
 	add_action( 'wp_ajax_boniface_cybersource_process_payment', 'boniface_cybersource_ajax_process_payment' );
 	add_action( 'wp_ajax_nopriv_boniface_cybersource_process_payment', 'boniface_cybersource_ajax_process_payment' );
+	add_action( 'wp_ajax_boniface_cybersource_record_payment', 'boniface_cybersource_ajax_record_payment' );
+	add_action( 'wp_ajax_nopriv_boniface_cybersource_record_payment', 'boniface_cybersource_ajax_record_payment' );
 }
 add_action( 'init', 'boniface_cybersource_init' );
 

@@ -185,12 +185,16 @@
 		});
 	}
 
-	/* ── Unified Checkout runner (completeMandate, sidebar) ── */
+	/* ── Unified Checkout runner (completeMandate, embedded) ── */
 
 	function runUnifiedCheckout(captureContext, clientLibrary, clientLibraryIntegrity) {
 		clearPaymentStepError();
+		var sel = document.getElementById('buttonPaymentListContainer');
+		var screen = document.getElementById('embeddedPaymentContainer');
+		if (sel) sel.innerHTML = '';
+		if (screen) screen.innerHTML = '';
 
-		console.log('[CYBERSOURCE] Running Unified Checkout (completeMandate, sidebar mode)...', {
+		console.log('[CYBERSOURCE] Running Unified Checkout (completeMandate, embedded mode)...', {
 			captureContextLength: captureContext ? captureContext.length : 0,
 			clientLibrary: clientLibrary,
 			hasIntegrity: !!clientLibraryIntegrity
@@ -206,13 +210,49 @@
 			})
 			.then(function (accept) {
 				ucAccept = accept;
-				console.log('[CYBERSOURCE] Accept() returned, calling unifiedPayments() in sidebar mode...');
-				return accept.unifiedPayments();
+				console.log('[CYBERSOURCE] Accept() returned, calling unifiedPayments(false) for embedded mode...');
+				return accept.unifiedPayments(false);
 			})
 			.then(function (up) {
-				console.log('[CYBERSOURCE] unifiedPayments() returned, calling show() (no containers — sidebar overlay)...');
-				$('#donation-payment-skeleton').addClass('hidden');
-				return up.show();
+				console.log('[CYBERSOURCE] unifiedPayments() returned, calling show() with containers...');
+				return new Promise(function (resolve, reject) {
+					var resolved = false;
+					function done(v) {
+						if (!resolved) {
+							resolved = true;
+							clearTimeout(tid);
+							$('#donation-payment-skeleton').addClass('hidden');
+							console.log('[CYBERSOURCE] up.show() resolved:', typeof v, v);
+							resolve(v);
+						}
+					}
+					function fail(e) {
+						if (!resolved) {
+							resolved = true;
+							clearTimeout(tid);
+							$('#donation-payment-skeleton').addClass('hidden');
+							console.error('[CYBERSOURCE] up.show() failed:', e);
+							reject(e);
+						}
+					}
+					var tid = setTimeout(function () {
+						var has = (sel && (sel.querySelector('iframe') || sel.children.length)) ||
+								  (screen && (screen.querySelector('iframe') || screen.children.length));
+						if (!has) fail(new Error('Payment form did not load within 10 seconds. Please refresh and try again.'));
+						else {
+							console.log('[CYBERSOURCE] Payment form containers populated.');
+							$('#donation-payment-skeleton').addClass('hidden');
+						}
+					}, 10000);
+					setTimeout(function () {
+						up.show({ containers: { paymentSelection: '#buttonPaymentListContainer', paymentScreen: '#embeddedPaymentContainer' } })
+							.then(done)
+							.catch(function (err) {
+								console.error('[CYBERSOURCE] up.show() error:', err);
+								fail(new Error((err && err.message) || 'Payment could not be processed.'));
+							});
+					}, 150);
+				});
 			});
 	}
 
@@ -316,15 +356,7 @@
 
 	function setPresetActive(btn) {
 		for (var i = 0; i < presets.length; i++) {
-			var b = presets[i];
-			b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
-			b.classList.remove('border-neutral-900', 'bg-neutral-900', 'text-white');
-			b.classList.add('border-neutral-200', 'bg-white', 'text-neutral-700');
-		}
-		if (btn) {
-			btn.setAttribute('aria-pressed', 'true');
-			btn.classList.remove('border-neutral-200', 'bg-white', 'text-neutral-700');
-			btn.classList.add('border-neutral-900', 'bg-neutral-900', 'text-white');
+			presets[i].setAttribute('aria-pressed', presets[i] === btn ? 'true' : 'false');
 		}
 	}
 

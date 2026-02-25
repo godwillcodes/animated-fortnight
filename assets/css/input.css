@@ -123,7 +123,9 @@ font-size: 16px !important;
   margin-top: 10px !important;
 }
 
-/* Donation form: skeleton / shimmer */
+/* ── Donation form ──────────────────────────────────────── */
+
+/* Skeleton shimmer */
 @keyframes donation-shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
@@ -140,19 +142,40 @@ font-size: 16px !important;
   animation: donation-shimmer 1.2s ease-in-out infinite;
   border-radius: 0.75rem;
 }
+
+/* Step transitions */
 .donation-form-step {
-  transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+  transition: opacity 0.3s ease-out, transform 0.3s ease-out;
 }
 .donation-form-step.donation-step-hidden {
   opacity: 0;
   pointer-events: none;
   position: absolute;
-  transform: translateY(-4px);
+  transform: translateY(-6px);
 }
 .donation-form-step.donation-step-visible {
   opacity: 1;
   transform: translateY(0);
 }
+
+/* Input focus with brand color */
+.donation-input:focus {
+  border-color: #0f6041 !important;
+  box-shadow: 0 0 0 3px rgba(15, 96, 65, 0.12);
+}
+
+/* Preset amount buttons — selected state */
+.preset-amount[aria-pressed="true"] {
+  border-color: #0f6041 !important;
+  background-color: #0f6041 !important;
+  color: #fff !important;
+}
+
+/* Donate card header */
+.donate-card {
+  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.06), 0 10px 36px -4px rgba(15,96,65,0.10);
+}
+
 /* Button loading spinner */
 .donate-btn-spinner {
   display: none;
@@ -172,7 +195,8 @@ font-size: 16px !important;
 @keyframes donation-spin {
   to { transform: rotate(360deg); }
 }
-/* Success checkmark animation */
+
+/* Success checkmark */
 @keyframes donation-checkmark {
   0% { stroke-dashoffset: 48; opacity: 0; }
   50% { opacity: 1; }
@@ -184,26 +208,31 @@ font-size: 16px !important;
   animation: donation-checkmark 0.5s ease-out forwards;
 }
 
-/* Progress stepper */
+/* Progress stepper — brand green */
 .donation-progress-dot {
-  width: 2rem;
-  height: 2rem;
+  width: 2.25rem;
+  height: 2.25rem;
   border-radius: 50%;
   background: #e5e7eb;
-  transition: background 0.2s ease, transform 0.2s ease;
+  transition: background 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
 }
 .donation-progress-num {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   font-weight: 700;
-  color: #6b7280;
-  transition: color 0.2s ease;
+  color: #9ca3af;
+  transition: color 0.3s ease;
 }
 .donation-progress-dot.active .donation-progress-num {
   color: #fff;
 }
 .donation-progress-dot.active {
-  background: #171717;
+  background: #0f6041;
+  box-shadow: 0 0 0 4px rgba(15, 96, 65, 0.15);
+  transform: scale(1.05);
+}
+.donation-progress-line {
+  transition: background 0.3s ease;
 }
 .donation-progress-line.completed {
-  background: #171717;
+  background: #0f6041;
 }

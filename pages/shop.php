@@ -56,7 +56,7 @@ get_header();
             <a href="<?php the_permalink(); ?>" class="group">
         <img src="<?php echo esc_url($image); ?>" alt="<?php the_title_attribute(); ?>" class="w-[300px] h-[300px] rounded-lg bg-gray-200 object-cover group-hover:opacity-75 " />
         <p class="mt-4 text-sm text-gray-700"><?php the_title(); ?></p>
-        <p class="mt-1 text-lg font-medium text-gray-900">KSh <?php echo esc_html($price); ?></p>
+        <p class="mt-1 text-lg font-medium text-gray-900">USD <?php echo esc_html($price); ?></p>
       </a>
 
          

@@ -865,6 +865,73 @@ function boniface_cybersource_ajax_process_payment() {
 	}
 }
 
+/* ── Donation progress tracker ──────────────────────────── */
+
+/**
+ * Record a successful donation in wp_options for the progress counter.
+ * Listens on the boniface_donation_payment_success hook.
+ *
+ * @param array $data Payment data: amount, currency, name, email, phone, message, payment_id.
+ */
+function boniface_donation_track( $data ) {
+	$amount = isset( $data['amount'] ) ? (float) $data['amount'] : 0;
+	if ( $amount <= 0 ) {
+		return;
+	}
+
+	$currency   = isset( $data['currency'] ) ? strtoupper( $data['currency'] ) : 'USD';
+	$payment_id = isset( $data['payment_id'] ) ? $data['payment_id'] : '';
+
+	// Prevent duplicate recording of the same payment_id.
+	if ( $payment_id ) {
+		$recorded_ids = get_option( 'boniface_donation_ids', array() );
+		if ( in_array( $payment_id, $recorded_ids, true ) ) {
+			error_log( '[DONATION_TRACKER] Duplicate payment_id=' . $payment_id . ' — skipping.' );
+			return;
+		}
+		$recorded_ids[] = $payment_id;
+		if ( count( $recorded_ids ) > 500 ) {
+			$recorded_ids = array_slice( $recorded_ids, -500 );
+		}
+		update_option( 'boniface_donation_ids', $recorded_ids, false );
+	}
+
+	// Convert to USD for the running total if needed.
+	$usd_amount = $amount;
+	if ( $currency === 'KES' ) {
+		$rate       = (float) get_option( 'boniface_donation_kes_to_usd', 0.0077 );
+		$usd_amount = $amount * $rate;
+	}
+
+	$total = (float) get_option( 'boniface_donation_total_usd', 0 );
+	$count = (int) get_option( 'boniface_donation_count', 0 );
+
+	$total += $usd_amount;
+	$count += 1;
+
+	update_option( 'boniface_donation_total_usd', $total, false );
+	update_option( 'boniface_donation_count', $count, false );
+
+	error_log( '[DONATION_TRACKER] Recorded: +$' . number_format( $usd_amount, 2 ) . ' (was ' . $currency . ' ' . $amount . ') — new total=$' . number_format( $total, 2 ) . ' count=' . $count );
+}
+add_action( 'boniface_donation_payment_success', 'boniface_donation_track' );
+
+/**
+ * Get donation progress stats.
+ *
+ * @return array{total: float, count: int, total_formatted: string}
+ */
+function boniface_donation_stats() {
+	$total = (float) get_option( 'boniface_donation_total_usd', 0 );
+	$count = (int) get_option( 'boniface_donation_count', 0 );
+
+	return array(
+		'total'           => $total,
+		'count'           => $count,
+		'total_formatted' => '$' . number_format( $total, 0, '.', ',' ),
+	);
+}
+
 /**
  * Register AJAX and enqueue CyberSource only on donate page.
  */
@@ -879,28 +946,29 @@ function boniface_cybersource_init() {
 add_action( 'init', 'boniface_cybersource_init' );
 
 /**
- * Enqueue Unified Checkout script and donation form handler on donate template.
+ * Enqueue CyberSource checkout scripts on donate and product pages.
  */
 function boniface_cybersource_scripts() {
-	if ( ! is_page_template( 'pages/donate-2.php' ) ) {
-		return;
-	}
-
-	$script_path = get_template_directory() . '/assets/js/donation-uc.js';
-	$script_uri  = get_template_directory_uri() . '/assets/js/donation-uc.js';
-	$version     = file_exists( $script_path ) ? filemtime( $script_path ) : ( defined( '_S_VERSION' ) ? _S_VERSION : '1.0.0' );
-	wp_enqueue_script(
-		'boniface-donation-uc',
-		$script_uri,
-		array( 'jquery' ),
-		$version,
-		true
-	);
-
-	wp_localize_script( 'boniface-donation-uc', 'bonifaceCybersource', array(
+	$localize_data = array(
 		'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 		'nonce'   => wp_create_nonce( 'boniface_cybersource' ),
 		'origin'  => home_url( '', 'https' ),
-	) );
+	);
+
+	if ( is_page_template( 'pages/donate-2.php' ) ) {
+		$script_path = get_template_directory() . '/assets/js/donation-uc.js';
+		$script_uri  = get_template_directory_uri() . '/assets/js/donation-uc.js';
+		$version     = file_exists( $script_path ) ? filemtime( $script_path ) : '1.0.0';
+		wp_enqueue_script( 'boniface-donation-uc', $script_uri, array( 'jquery' ), $version, true );
+		wp_localize_script( 'boniface-donation-uc', 'bonifaceCybersource', $localize_data );
+	}
+
+	if ( is_singular( 'product' ) ) {
+		$script_path = get_template_directory() . '/assets/js/product-checkout.js';
+		$script_uri  = get_template_directory_uri() . '/assets/js/product-checkout.js';
+		$version     = file_exists( $script_path ) ? filemtime( $script_path ) : '1.0.0';
+		wp_enqueue_script( 'boniface-product-checkout', $script_uri, array( 'jquery' ), $version, true );
+		wp_localize_script( 'boniface-product-checkout', 'bonifaceCybersource', $localize_data );
+	}
 }
 add_action( 'wp_enqueue_scripts', 'boniface_cybersource_scripts', 20 );

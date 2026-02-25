@@ -57,9 +57,10 @@ get_header();
 <section class="max-w-7xl mx-auto my-24 px-6 lg:px-0 space-y-20">
 
   <!-- DONATION FORM (primary CTA — comes first) -->
-  <div id="donation-form" class="max-w-2xl mx-auto scroll-mt-8">
+  <div id="donation-form" class="max-w-5xl mx-auto scroll-mt-8">
     <div class="donate-card rounded-3xl shadow-xl border border-neutral-200/60 bg-white overflow-hidden">
-      <div class="donate-card-header px-8 pt-10 pb-6 text-center" style="background: linear-gradient(135deg, #0f6041 0%, #1a7a54 50%, #0f6041 100%);">
+      <?php $donation_stats = boniface_donation_stats(); ?>
+      <div class="donate-card-header px-8 pt-10 pb-8 text-center" style="background: linear-gradient(135deg, #0f6041 0%, #1a7a54 50%, #0f6041 100%);">
         <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-white/15 backdrop-blur-sm mb-5">
           <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
@@ -67,6 +68,23 @@ get_header();
         </div>
         <h2 class="text-3xl font-bold text-white tracking-tight">Support the Work</h2>
         <p class="mt-2 text-white/80 text-base">Every contribution fuels the movement for change.</p>
+
+        <!-- Donation progress stats -->
+        <div class="mt-8 pt-6 border-t border-white/15 flex items-center justify-center gap-8">
+          <div>
+            <p class="text-2xl md:text-3xl font-extrabold text-white tracking-tight leading-none">
+              <?php echo esc_html( $donation_stats['total_formatted'] ); ?>
+            </p>
+            <p class="text-xs text-white/60 mt-1 font-medium">raised</p>
+          </div>
+          <div class="w-px h-10 bg-white/15"></div>
+          <div>
+            <p class="text-2xl md:text-3xl font-extrabold text-white tracking-tight leading-none">
+              <?php echo esc_html( number_format( $donation_stats['count'] ) ); ?>
+            </p>
+            <p class="text-xs text-white/60 mt-1 font-medium">donation<?php echo $donation_stats['count'] !== 1 ? 's' : ''; ?></p>
+          </div>
+        </div>
       </div>
       <div class="px-8 py-10">
         <?php get_template_part('components/payment/payment', 'form'); ?>

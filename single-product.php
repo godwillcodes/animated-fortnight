@@ -83,105 +83,128 @@ get_header();
       </div>
 
       <!-- Options -->
-      <div class="mt-4 lg:row-span-3 lg:mt-0">
+      <div class="mt-4 lg:row-span-3 lg:mt-0 border border-gray-500 p-10">
         <h2 class="sr-only">Product information</h2>
-        <?php 
+        <?php
         $price = get_field('price');
-        if ($price): ?>
-          <p class="text-4xl font-bold tracking-tight text-gray-900">$. <?php echo esc_html($price); ?></p>
-        <?php endif; ?>
+        $price_float = $price ? (float) $price : 0;
+        ?>
+        <?php if ( $price_float > 0 ) : ?>
+          <p class="text-4xl font-bold tracking-tight text-gray-900">$<?php echo esc_html( number_format( $price_float, 2 ) ); ?></p>
 
-        <!-- Payment Options -->
-        <div class="mt-10" x-data="paymentOptions()">
-         
+        <!-- CyberSource Checkout -->
+        <form id="product-checkout-form" class="mt-8 space-y-6">
+          <input type="hidden" id="product-price" value="<?php echo esc_attr( $price_float ); ?>">
+          <input type="hidden" id="product-title" value="<?php echo esc_attr( get_the_title() ); ?>">
 
-          <!-- Payment Status Messages -->
-          <div x-show="paymentStatus" 
-               x-transition:enter="transition ease-out duration-300"
-               x-transition:enter-start="opacity-0 transform scale-95"
-               x-transition:enter-end="opacity-100 transform scale-100"
-               class="mt-4 p-4 rounded-2xl border-2"
-               :class="{
-                 'bg-green-50 border-green-200': paymentStatus === 'success',
-                 'bg-red-50 border-red-200': paymentStatus === 'error',
-                 'bg-blue-50 border-blue-200': paymentStatus === 'info'
-               }">
-            <div class="flex items-start">
-              <div class="flex-shrink-0">
-                <svg x-show="paymentStatus === 'success'" class="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                <svg x-show="paymentStatus === 'error'" class="h-6 w-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                <svg x-show="paymentStatus === 'info'" class="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
+          <!-- Buyer details -->
+          <div class="space-y-4">
+            <h3 class="text-sm font-bold text-neutral-800 tracking-tight">Your details</h3>
+            <div>
+              <label for="buyer-name" class="block text-sm font-medium text-neutral-600 mb-1.5">Full name</label>
+              <input type="text" id="buyer-name" name="name" autocomplete="name" placeholder="John Doe"
+                class="donation-input w-full rounded-xl border-2 border-neutral-200 bg-neutral-50 px-4 py-3 text-neutral-900 placeholder:text-neutral-400 transition-all duration-200 focus:outline-none focus:bg-white"
+                required />
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label for="buyer-email" class="block text-sm font-medium text-neutral-600 mb-1.5">Email</label>
+                <input type="email" id="buyer-email" name="email" autocomplete="email" placeholder="you@example.com"
+                  class="donation-input w-full rounded-xl border-2 border-neutral-200 bg-neutral-50 px-4 py-3 text-neutral-900 placeholder:text-neutral-400 transition-all duration-200 focus:outline-none focus:bg-white"
+                  required />
               </div>
-              <div class="ml-3">
-                <p class="text-sm font-medium" 
-                   :class="{
-                     'text-green-800': paymentStatus === 'success',
-                     'text-red-800': paymentStatus === 'error',
-                     'text-blue-800': paymentStatus === 'info'
-                   }"
-                   x-text="paymentMessage"></p>
+              <div>
+                <label for="buyer-phone" class="block text-sm font-medium text-neutral-600 mb-1.5">Phone</label>
+                <input type="tel" id="buyer-phone" name="phone" autocomplete="tel" placeholder="+254 7XX XXX XXX"
+                  class="donation-input w-full rounded-xl border-2 border-neutral-200 bg-neutral-50 px-4 py-3 text-neutral-900 placeholder:text-neutral-400 transition-all duration-200 focus:outline-none focus:bg-white"
+                  required />
               </div>
             </div>
           </div>
-        </div>
 
-        <!-- Forminator PayPal Form (Hidden by default, shown when PayPal is selected and button clicked) -->
-        <div x-bind:class="selectedMethod === 'paypal' && showForm ? 'block' : 'hidden'"
-             x-transition:enter="transition ease-out duration-500"
-             x-transition:enter-start="opacity-0 transform translate-y-4"
-             x-transition:enter-end="opacity-100 transform translate-y-0"
-             class="mt-8 bg-white border-2 border-[#001c64] rounded-3xl p-8 shadow-xl paypal-form-container">
-          
-          <!-- PayPal Branded Header -->
-          
-
-          <!-- PayPal Security Badge -->
-          <div class="flex items-center justify-center mb-6 p-4 bg-blue-50 rounded-xl border border-blue-200">
-            <svg class="w-6 h-6 text-[#001c64] mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+          <!-- Submit -->
+          <button type="submit" id="product-buy-btn"
+            class="button-kenya w-full inline-flex justify-center items-center gap-3 rounded-xl px-6 py-4 text-base font-bold text-white transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 active:scale-[0.99] disabled:opacity-70 disabled:cursor-not-allowed"
+            style="--tw-ring-color: #0f6041;">
+            <span class="donate-btn-spinner" aria-hidden="true"></span>
+            <svg class="donate-btn-icon w-5 h-5 shrink-0 text-white/90" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z" />
             </svg>
-            <div class="text-center">
-              <p class="text-sm font-semibold text-[#001c64]">256-bit SSL Encryption</p>
-              <p class="text-xs text-gray-600">Your payment information is secure</p>
+            <span class="donate-btn-text">Buy now — $<?php echo esc_html( number_format( $price_float, 2 ) ); ?></span>
+          </button>
+
+          <div id="product-form-error" class="hidden rounded-xl border-2 border-red-200 bg-red-50 p-4 text-red-800 text-sm font-medium"></div>
+        </form>
+
+        <!-- Payment step (hidden until buyer clicks Buy) -->
+        <div id="product-payment-step" class="hidden mt-6 space-y-4">
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <p class="text-base font-semibold text-neutral-900">Complete your purchase</p>
+              <p class="text-sm text-neutral-500 mt-0.5">Card details handled securely by CyberSource.</p>
             </div>
+            <button type="button" id="product-back-btn" class="text-sm font-medium text-neutral-500 hover:text-neutral-900 transition-colors flex items-center gap-1.5 shrink-0">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
+              Back
+            </button>
           </div>
-
-          <!-- Form Content -->
-          <div class="forminator-form-113 paypal-form-content">
-            <?php echo do_shortcode('[forminator_form id="124"]'); ?>
-          </div>
-
-          <!-- PayPal Footer -->
-          <div class="mt-6 pt-6 border-t border-gray-200">
-            <div class="flex items-center justify-center">
-              <img src="https://www.paypalobjects.com/webstatic/mktg/logo/pp_cc_mark_37x23.jpg" 
-                   alt="PayPal" 
-                   class="h-6 w-auto mr-3">
-              <span class="text-sm text-gray-600">Powered by PayPal</span>
+          <div id="product-payment-error" class="hidden rounded-xl border-2 border-red-200 bg-red-50 p-4 text-red-800 text-sm font-medium"></div>
+          <div class="relative min-h-[360px]">
+            <div id="product-payment-skeleton" class="absolute inset-0 z-10 flex flex-col gap-4 pointer-events-none">
+              <div class="donation-skeleton h-20 w-full flex-0"></div>
+              <div class="donation-skeleton h-72 w-full flex-1 min-h-[280px]"></div>
+            </div>
+            <div class="relative z-0 space-y-4">
+              <div id="productPaymentListContainer" class="min-h-[80px] rounded-xl border-2 border-neutral-200 bg-neutral-50/50 p-4"></div>
+              <div id="productPaymentContainer" class="min-h-[280px] rounded-xl border-2 border-neutral-200 bg-white"></div>
             </div>
           </div>
         </div>
 
-        <!-- Security Badge -->
-        <div class="mt-8 flex items-center justify-center gap-3 text-sm text-gray-500">
-          <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-          </svg>
-          <span>Secure SSL encrypted payment</span>
+        <!-- Success -->
+        <div id="product-success-step" class="hidden mt-6 text-center py-10 px-6 rounded-2xl" style="background: linear-gradient(to bottom, #f0faf4, #ffffff); border: 2px solid #bbf7d0;">
+          <div class="inline-flex items-center justify-center w-16 h-16 rounded-full mb-6" style="background-color: #dcfce7;">
+            <svg class="w-8 h-8 donation-success-check" style="color: #0f6041;" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <p class="product-success-msg text-xl font-bold text-neutral-900 mb-2"></p>
+          <p class="text-sm text-neutral-600">A confirmation email will be sent to you.</p>
         </div>
+
+        <!-- Error -->
+        <div id="product-error-step" class="hidden mt-6 text-center py-10 px-6 rounded-2xl border-2 border-red-200 bg-red-50">
+          <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-100 mb-6">
+            <svg class="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <p class="product-error-msg text-lg font-semibold text-red-900 mb-4"></p>
+          <button type="button" id="product-retry-btn" class="rounded-xl px-5 py-2.5 text-sm font-semibold text-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2" style="background-color: #0f6041; --tw-ring-color: #0f6041;">Try again</button>
+        </div>
+
+        <!-- Security -->
+        <div class="mt-6 flex items-center justify-center gap-3">
+          <div class="flex items-center gap-1.5">
+            <svg class="w-4 h-4 shrink-0 text-neutral-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+              <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" />
+            </svg>
+            <span class="text-xs text-neutral-400">256-bit SSL</span>
+          </div>
+          <span class="text-neutral-300">&middot;</span>
+          <span class="text-xs text-neutral-400">CyberSource Unified Checkout</span>
+        </div>
+
+        <?php else : ?>
+          <p class="mt-4 text-lg text-neutral-500">Price not available. Please contact us for details.</p>
+        <?php endif; ?>
       </div>
 
       <!-- Product Details -->
       <div class="py-10 lg:col-span-2 lg:col-start-1 lg:border-r lg:border-gray-200 lg:pt-6 lg:pr-8 lg:pb-16">
         <div>
           <h3 class="text-2xl font-bold text-gray-900 mb-4">Description</h3>
-          <div class="prose prose-gray max-w-none">
+          <div class="prose text-lg prose-gray max-w-none">
             <?php the_content(); ?>
           </div>
         </div>
@@ -191,241 +214,5 @@ get_header();
   </div>
 </div>
 
-<style>
-[x-cloak] { display: none !important; }
-
-/* PayPal Form Styling */
-.paypal-form-container {
-  border-color: #001c64 !important;
-  box-shadow: 0 20px 25px -5px rgba(0, 28, 100, 0.1), 0 10px 10px -5px rgba(0, 28, 100, 0.04);
-}
-
-.paypal-form-content {
-  background: #f8fafc;
-  border-radius: 12px;
-  padding: 24px;
-  border: 1px solid #e2e8f0;
-}
-
-/* Forminator Form Styling for PayPal */
-.paypal-form-content .forminator-form {
-  background: transparent !important;
-  border: none !important;
-  padding: 0 !important;
-}
-
-.paypal-form-content .forminator-field {
-  margin-bottom: 20px;
-}
-
-.paypal-form-content .forminator-label {
-  color: #001c64 !important;
-  font-weight: 600 !important;
-  font-size: 14px !important;
-  margin-bottom: 8px !important;
-  display: block !important;
-}
-
-.paypal-form-content .forminator-input {
-  width: 100% !important;
-  padding: 12px 16px !important;
-  border: 2px solid #e2e8f0 !important;
-  border-radius: 8px !important;
-  font-size: 16px !important;
-  transition: all 0.3s ease !important;
-  background: white !important;
-}
-
-.paypal-form-content .forminator-input:focus {
-  border-color: #001c64 !important;
-  box-shadow: 0 0 0 3px rgba(0, 28, 100, 0.1) !important;
-  outline: none !important;
-}
-
-.paypal-form-content .forminator-textarea {
-  width: 100% !important;
-  padding: 12px 16px !important;
-  border: 2px solid #e2e8f0 !important;
-  border-radius: 8px !important;
-  font-size: 16px !important;
-  min-height: 100px !important;
-  resize: vertical !important;
-  transition: all 0.3s ease !important;
-  background: white !important;
-}
-
-.paypal-form-content .forminator-textarea:focus {
-  border-color: #001c64 !important;
-  box-shadow: 0 0 0 3px rgba(0, 28, 100, 0.1) !important;
-  outline: none !important;
-}
-
-.paypal-form-content .forminator-select {
-  width: 100% !important;
-  padding: 12px 16px !important;
-  border: 2px solid #e2e8f0 !important;
-  border-radius: 8px !important;
-  font-size: 16px !important;
-  background: white !important;
-  cursor: pointer !important;
-  transition: all 0.3s ease !important;
-}
-
-.paypal-form-content .forminator-select:focus {
-  border-color: #001c64 !important;
-  box-shadow: 0 0 0 3px rgba(0, 28, 100, 0.1) !important;
-  outline: none !important;
-}
-
-.paypal-form-content .forminator-checkbox,
-.paypal-form-content .forminator-radio {
-  accent-color: #001c64 !important;
-  margin-right: 8px !important;
-}
-
-.paypal-form-content .forminator-checkbox-label,
-.paypal-form-content .forminator-radio-label {
-  color: #374151 !important;
-  font-size: 14px !important;
-  cursor: pointer !important;
-}
-
-.paypal-form-content .forminator-button {
-  background: linear-gradient(135deg, #001c64 0%, #003087 100%) !important;
-  color: white !important;
-  border: none !important;
-  padding: 16px 32px !important;
-  border-radius: 8px !important;
-  font-size: 16px !important;
-  font-weight: 600 !important;
-  cursor: pointer !important;
-  transition: all 0.3s ease !important;
-  width: 100% !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.5px !important;
-}
-
-.paypal-form-content .forminator-button:hover {
-  background: linear-gradient(135deg, #003087 0%, #001c64 100%) !important;
-  transform: translateY(-2px) !important;
-  box-shadow: 0 10px 20px rgba(0, 28, 100, 0.3) !important;
-}
-
-.paypal-form-content .forminator-button:active {
-  transform: translateY(0) !important;
-}
-
-.paypal-form-content .forminator-error {
-  color: #dc2626 !important;
-  font-size: 12px !important;
-  margin-top: 4px !important;
-  display: block !important;
-}
-
-.paypal-form-content .forminator-success {
-  color: #059669 !important;
-  font-size: 12px !important;
-  margin-top: 4px !important;
-  display: block !important;
-}
-
-/* PayPal Brand Colors */
-.paypal-blue {
-  color: #001c64 !important;
-}
-
-.paypal-blue-bg {
-  background-color: #001c64 !important;
-}
-
-.paypal-blue-border {
-  border-color: #001c64 !important;
-}
-
-/* Form Field Groups */
-.paypal-form-content .forminator-row {
-  display: flex !important;
-  gap: 16px !important;
-  margin-bottom: 20px !important;
-}
-
-.paypal-form-content .forminator-col {
-  flex: 1 !important;
-}
-
-/* Loading States */
-.paypal-form-content .forminator-loading {
-  opacity: 0.6 !important;
-  pointer-events: none !important;
-}
-
-.paypal-form-content .forminator-spinner {
-  border: 2px solid #e2e8f0 !important;
-  border-top: 2px solid #001c64 !important;
-  border-radius: 50% !important;
-  width: 20px !important;
-  height: 20px !important;
-  animation: spin 1s linear infinite !important;
-  display: inline-block !important;
-  margin-right: 8px !important;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-/* Responsive Design */
-@media (max-width: 768px) {
-  .paypal-form-content .forminator-row {
-    flex-direction: column !important;
-    gap: 0 !important;
-  }
-  
-  .paypal-form-content {
-    padding: 16px !important;
-  }
-}
-</style>
-
-<script>
-function paymentOptions() {
-  return {
-    selectedMethod: 'paypal',
-    showForm: false,
-    paymentStatus: null,
-    paymentMessage: '',
-    isLoading: false,
-
-    init() {
-      // Start with PayPal selected
-      this.selectedMethod = 'paypal';
-      this.showForm = false;
-    },
-
-    handleContinue() {
-      // Show the PayPal form
-      this.showForm = true;
-      this.paymentStatus = 'success';
-      this.paymentMessage = 'Complete the form below to proceed with PayPal payment';
-      
-      // Reinitialize Forminator when form is revealed
-      this.$nextTick(() => {
-        if (typeof window.FORMINATOR !== 'undefined' && window.FORMINATOR.init) {
-          window.FORMINATOR.init();
-        }
-        
-        // Smooth scroll to form
-        setTimeout(() => {
-          const formElement = document.querySelector('.forminator-form-113');
-          if (formElement) {
-            formElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }
-        }, 100);
-      });
-    }
-  }
-}
-</script>
 
 <?php get_footer(); ?>

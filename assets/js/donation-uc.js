@@ -144,6 +144,23 @@
 	}
 
 	function recordPayment(result) {
+		var paymentId = '';
+		var paymentStatus = 'UNKNOWN';
+		var rawForServer = result;
+
+		if (typeof result === 'string' && result.indexOf('eyJ') === 0) {
+			var parsed = parseCompleteMandateJwt(result);
+			if (parsed) {
+				paymentId = parsed.jti || '';
+				paymentStatus = parsed.jti ? 'CAPTURED' : 'UNKNOWN';
+			}
+			rawForServer = result;
+		} else if (result && typeof result === 'object') {
+			paymentId = (result.id != null) ? String(result.id) : '';
+			paymentStatus = (result.status != null) ? String(result.status) : (paymentId ? 'CAPTURED' : 'UNKNOWN');
+			rawForServer = JSON.stringify(result);
+		}
+
 		return $.ajax({
 			url: config.ajaxUrl,
 			type: 'POST',
@@ -156,11 +173,30 @@
 				amount: parseFloat($('#amount').val()) || 0,
 				currency: 'USD',
 				message: $('#message').val(),
-				payment_id: (result && result.id) || '',
-				payment_status: (result && result.status) || 'UNKNOWN',
-				raw_result: JSON.stringify(result || {})
+				payment_id: paymentId,
+				payment_status: paymentStatus,
+				raw_result: rawForServer
 			}
 		});
+	}
+
+	/**
+	 * Parse completeMandate response JWT payload (Base64url). Returns { jti } or null.
+	 */
+	function parseCompleteMandateJwt(jwtStr) {
+		try {
+			var parts = (typeof jwtStr === 'string') ? jwtStr.trim().split('.') : [];
+			if (parts.length !== 3) return null;
+			var payloadB64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+			var jsonStr = decodeURIComponent(atob(payloadB64).split('').map(function (c) {
+				return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+			}).join(''));
+			var payload = JSON.parse(jsonStr);
+			return { jti: payload.jti || null };
+		} catch (e) {
+			console.warn('[CYBERSOURCE] JWT parse error:', e);
+			return null;
+		}
 	}
 
 	/* ── Script loader ────────────────────────────────────── */

@@ -762,26 +762,77 @@ function boniface_cybersource_ajax_record_payment() {
 	$message    = isset( $_POST['message'] ) ? sanitize_textarea_field( wp_unslash( $_POST['message'] ) ) : '';
 	$payment_id = isset( $_POST['payment_id'] ) ? sanitize_text_field( wp_unslash( $_POST['payment_id'] ) ) : '';
 	$status     = isset( $_POST['payment_status'] ) ? sanitize_text_field( wp_unslash( $_POST['payment_status'] ) ) : '';
-	$raw_result = isset( $_POST['raw_result'] ) ? sanitize_textarea_field( wp_unslash( $_POST['raw_result'] ) ) : '';
+	$raw_result = isset( $_POST['raw_result'] ) ? wp_unslash( $_POST['raw_result'] ) : '';
+	if ( is_array( $raw_result ) ) {
+		$raw_result = '';
+	}
+	$raw_result = is_string( $raw_result ) ? trim( $raw_result ) : '';
+
+	// If client sent no payment_id but raw_result is a JWT (completeMandate response), extract jti.
+	if ( $raw_result !== '' && $payment_id === '' && strpos( $raw_result, 'eyJ' ) === 0 && substr_count( $raw_result, '.' ) === 2 ) {
+		$jti = boniface_cybersource_jwt_get_jti( $raw_result );
+		if ( $jti !== '' ) {
+			$payment_id = $jti;
+			if ( $status === '' || $status === 'UNKNOWN' ) {
+				$status = 'CAPTURED';
+			}
+		}
+	}
+
+	$allowed_statuses = array( 'CAPTURED', 'AUTHORIZED', 'PENDING' );
+	$is_confirmed_success = ( $payment_id !== '' && $amount > 0 )
+		&& ( in_array( $status, $allowed_statuses, true ) || $status === 'UNKNOWN' || $status === '' );
 
 	error_log( '[CYBERSOURCE][RECORD] === completeMandate PAYMENT RESULT ===' );
 	error_log( '[CYBERSOURCE][RECORD] status=' . $status . ' payment_id=' . $payment_id );
 	error_log( '[CYBERSOURCE][RECORD] amount=' . $amount . ' currency=' . $currency );
 	error_log( '[CYBERSOURCE][RECORD] name=' . $name . ' email=' . $email . ' phone=' . $phone );
-	error_log( '[CYBERSOURCE][RECORD] raw_result=' . $raw_result );
+	error_log( '[CYBERSOURCE][RECORD] raw_result=' . ( $raw_result !== '' ? substr( $raw_result, 0, 80 ) . '...' : '' ) );
+	error_log( '[CYBERSOURCE][RECORD] is_confirmed_success=' . ( $is_confirmed_success ? 'yes' : 'no' ) );
 
-	do_action( 'boniface_donation_payment_success', array(
-		'amount'      => $amount,
-		'currency'    => $currency,
-		'name'        => $name,
-		'email'       => $email,
-		'phone'       => $phone,
-		'message'     => $message,
-		'payment_id'  => $payment_id,
-	) );
+	if ( $is_confirmed_success && $amount > 0 ) {
+		do_action( 'boniface_donation_payment_success', array(
+			'amount'      => $amount,
+			'currency'    => $currency,
+			'name'        => $name,
+			'email'       => $email,
+			'phone'       => $phone,
+			'message'     => $message,
+			'payment_id'  => $payment_id,
+		) );
+	} else {
+		error_log( '[CYBERSOURCE][RECORD] Not recording: success not confirmed or amount <= 0 (payment_id=' . $payment_id . ' status=' . $status . ' amount=' . $amount . ').' );
+	}
 
-	wp_send_json( array( 'success' => true, 'recorded' => true ) );
+	wp_send_json( array( 'success' => true, 'recorded' => $is_confirmed_success && $amount > 0 ) );
 	return;
+}
+
+/**
+ * Decode JWT payload (middle part) and return jti claim. No signature verification.
+ *
+ * @param string $jwt Raw JWT string.
+ * @return string jti value or empty string.
+ */
+function boniface_cybersource_jwt_get_jti( $jwt ) {
+	$jwt = is_string( $jwt ) ? trim( $jwt ) : '';
+	if ( $jwt === '' ) {
+		return '';
+	}
+	$parts = explode( '.', $jwt );
+	if ( count( $parts ) !== 3 ) {
+		return '';
+	}
+	$payload_b64 = strtr( $parts[1], '-_', '+/' );
+	$payload_json = base64_decode( $payload_b64, true );
+	if ( $payload_json === false ) {
+		return '';
+	}
+	$payload = json_decode( $payload_json, true );
+	if ( ! is_array( $payload ) || ! isset( $payload['jti'] ) || ! is_string( $payload['jti'] ) ) {
+		return '';
+	}
+	return trim( $payload['jti'] );
 }
 
 /**

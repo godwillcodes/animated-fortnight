@@ -123,6 +123,7 @@
 			if (parsed) {
 				paymentId = parsed.jti || '';
 				paymentStatus = parsed.jti ? 'CAPTURED' : 'UNKNOWN';
+				console.log('[CYBERSOURCE] Parsed completeMandate JWT: jti=' + (parsed.jti || '') + ' payment_status=' + paymentStatus);
 			}
 			rawForServer = result;
 		} else if (result && typeof result === 'object') {
@@ -186,8 +187,22 @@
 			.then(function (up) {
 				return new Promise(function (resolve, reject) {
 					var resolved = false;
-					function done(v) { if (!resolved) { resolved = true; clearTimeout(tid); hideEl('product-payment-skeleton'); resolve(v); } }
-					function fail(e) { if (!resolved) { resolved = true; clearTimeout(tid); hideEl('product-payment-skeleton'); reject(e); } }
+					function done(v) {
+						if (!resolved) {
+							resolved = true;
+							clearTimeout(tid);
+							hideEl('product-payment-skeleton');
+							resolve({ up: up, tt: v });
+						}
+					}
+					function fail(e) {
+						if (!resolved) {
+							resolved = true;
+							clearTimeout(tid);
+							hideEl('product-payment-skeleton');
+							reject(e);
+						}
+					}
 					var tid = setTimeout(function () {
 						var has = (sel && (sel.querySelector('iframe') || sel.children.length)) ||
 								  (screen && (screen.querySelector('iframe') || screen.children.length));
@@ -200,6 +215,12 @@
 							.catch(function (err) { fail(new Error((err && err.message) || 'Payment could not be processed.')); });
 					}, 150);
 				});
+			})
+			.then(function (obj) {
+				var up = obj.up;
+				var tt = obj.tt;
+				if (!up || !tt) return Promise.reject(new Error('No payment token received.'));
+				return up.complete(tt);
 			});
 	}
 

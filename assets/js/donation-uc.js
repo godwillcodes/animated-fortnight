@@ -153,6 +153,7 @@
 			if (parsed) {
 				paymentId = parsed.jti || '';
 				paymentStatus = parsed.jti ? 'CAPTURED' : 'UNKNOWN';
+				console.log('[CYBERSOURCE] Parsed completeMandate JWT: jti=' + (parsed.jti || '') + ' payment_status=' + paymentStatus);
 			}
 			rawForServer = result;
 		} else if (result && typeof result === 'object') {
@@ -258,8 +259,8 @@
 							resolved = true;
 							clearTimeout(tid);
 							$('#donation-payment-skeleton').addClass('hidden');
-							console.log('[CYBERSOURCE] up.show() resolved:', typeof v, v);
-							resolve(v);
+							console.log('[CYBERSOURCE] up.show() resolved (transient token):', typeof v);
+							resolve({ up: up, tt: v });
 						}
 					}
 					function fail(e) {
@@ -289,6 +290,14 @@
 							});
 					}, 150);
 				});
+			})
+			.then(function (obj) {
+				// Per CyberSource doc: call up.complete(tt) to process payment; completeResponse contains transaction outcome.
+				var up = obj.up;
+				var tt = obj.tt;
+				if (!up || !tt) return Promise.reject(new Error('No payment token received.'));
+				console.log('[CYBERSOURCE] Calling up.complete(tt) to process payment...');
+				return up.complete(tt);
 			});
 	}
 
@@ -328,13 +337,12 @@
 				return runUnifiedCheckout(ctx, res.client_library, res.client_library_integrity);
 			})
 			.then(function (result) {
-				console.log('[CYBERSOURCE] === completeMandate RESULT ===');
+				console.log('[CYBERSOURCE] === completeResponse from up.complete(tt) ===');
 				console.log('[CYBERSOURCE] Result type:', typeof result);
 				console.log('[CYBERSOURCE] Result value:', JSON.stringify(result, null, 2));
 
 				if (typeof result === 'string' && result.indexOf('eyJ') === 0) {
-					console.log('[CYBERSOURCE] Got transient token (completeMandate may have processed internally).');
-					console.log('[CYBERSOURCE] Token length:', result.length);
+					console.log('[CYBERSOURCE] completeResponse is JWT (length:', result.length + ').');
 				}
 
 				if (result && typeof result === 'object') {

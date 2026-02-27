@@ -768,20 +768,38 @@ function boniface_cybersource_ajax_record_payment() {
 	}
 	$raw_result = is_string( $raw_result ) ? trim( $raw_result ) : '';
 
-	// If client sent no payment_id but raw_result is a JWT (completeMandate response), extract jti.
-	if ( $raw_result !== '' && $payment_id === '' && strpos( $raw_result, 'eyJ' ) === 0 && substr_count( $raw_result, '.' ) === 2 ) {
-		$jti = boniface_cybersource_jwt_get_jti( $raw_result );
-		if ( $jti !== '' ) {
-			$payment_id = $jti;
-			if ( $status === '' || $status === 'UNKNOWN' ) {
-				$status = 'CAPTURED';
+	// If client sent no payment_id but raw_result is a JWT (completeMandate response), extract jti and log parsed payload.
+	if ( $raw_result !== '' && strpos( $raw_result, 'eyJ' ) === 0 && substr_count( $raw_result, '.' ) === 2 ) {
+		$payload = boniface_cybersource_jwt_decode_payload( $raw_result );
+		if ( is_array( $payload ) ) {
+			// Log parsed JWT claims (safe only: no nested content/card data).
+			$log_claims = array(
+				'jti'   => isset( $payload['jti'] ) ? $payload['jti'] : null,
+				'iss'   => isset( $payload['iss'] ) ? $payload['iss'] : null,
+				'type'  => isset( $payload['type'] ) ? $payload['type'] : null,
+				'iat'   => isset( $payload['iat'] ) ? $payload['iat'] : null,
+				'exp'   => isset( $payload['exp'] ) ? $payload['exp'] : null,
+			);
+			if ( isset( $payload['metadata'] ) && is_array( $payload['metadata'] ) ) {
+				$log_claims['metadata'] = $payload['metadata'];
+			}
+			error_log( '[CYBERSOURCE][RECORD] Parsed JWT payload (safe claims): ' . wp_json_encode( $log_claims ) );
+
+			if ( $payment_id === '' && isset( $payload['jti'] ) && is_string( $payload['jti'] ) ) {
+				$jti = trim( $payload['jti'] );
+				if ( $jti !== '' ) {
+					$payment_id = $jti;
+					if ( $status === '' || $status === 'UNKNOWN' ) {
+						$status = 'CAPTURED';
+					}
+				}
 			}
 		}
 	}
 
 	$allowed_statuses = array( 'CAPTURED', 'AUTHORIZED', 'PENDING' );
 	$is_confirmed_success = ( $payment_id !== '' && $amount > 0 )
-		&& ( in_array( $status, $allowed_statuses, true ) || $status === 'UNKNOWN' || $status === '' );
+		&& in_array( $status, $allowed_statuses, true );
 
 	error_log( '[CYBERSOURCE][RECORD] === completeMandate PAYMENT RESULT ===' );
 	error_log( '[CYBERSOURCE][RECORD] status=' . $status . ' payment_id=' . $payment_id );
@@ -809,26 +827,37 @@ function boniface_cybersource_ajax_record_payment() {
 }
 
 /**
+ * Decode JWT payload (middle part). No signature verification.
+ *
+ * @param string $jwt Raw JWT string.
+ * @return array|null Decoded payload array or null on failure.
+ */
+function boniface_cybersource_jwt_decode_payload( $jwt ) {
+	$jwt = is_string( $jwt ) ? trim( $jwt ) : '';
+	if ( $jwt === '' ) {
+		return null;
+	}
+	$parts = explode( '.', $jwt );
+	if ( count( $parts ) !== 3 ) {
+		return null;
+	}
+	$payload_b64 = strtr( $parts[1], '-_', '+/' );
+	$payload_json = base64_decode( $payload_b64, true );
+	if ( $payload_json === false ) {
+		return null;
+	}
+	$payload = json_decode( $payload_json, true );
+	return is_array( $payload ) ? $payload : null;
+}
+
+/**
  * Decode JWT payload (middle part) and return jti claim. No signature verification.
  *
  * @param string $jwt Raw JWT string.
  * @return string jti value or empty string.
  */
 function boniface_cybersource_jwt_get_jti( $jwt ) {
-	$jwt = is_string( $jwt ) ? trim( $jwt ) : '';
-	if ( $jwt === '' ) {
-		return '';
-	}
-	$parts = explode( '.', $jwt );
-	if ( count( $parts ) !== 3 ) {
-		return '';
-	}
-	$payload_b64 = strtr( $parts[1], '-_', '+/' );
-	$payload_json = base64_decode( $payload_b64, true );
-	if ( $payload_json === false ) {
-		return '';
-	}
-	$payload = json_decode( $payload_json, true );
+	$payload = boniface_cybersource_jwt_decode_payload( $jwt );
 	if ( ! is_array( $payload ) || ! isset( $payload['jti'] ) || ! is_string( $payload['jti'] ) ) {
 		return '';
 	}

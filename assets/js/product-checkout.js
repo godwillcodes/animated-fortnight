@@ -118,8 +118,11 @@
 		var paymentStatus = 'UNKNOWN';
 		var rawForServer = result;
 
+		console.log('[CYBERSOURCE] recordPayment() called. result type=', typeof result);
+
 		if (typeof result === 'string' && result.indexOf('eyJ') === 0) {
 			var parsed = parseCompleteMandateJwt(result);
+			console.log('[CYBERSOURCE] After parseCompleteMandateJwt: parsed=', parsed, 'jti=', parsed ? parsed.jti : 'N/A');
 			if (parsed) {
 				paymentId = parsed.jti || '';
 				paymentStatus = parsed.jti ? 'CAPTURED' : 'UNKNOWN';
@@ -130,7 +133,10 @@
 			paymentId = (result.id != null) ? String(result.id) : '';
 			paymentStatus = (result.status != null) ? String(result.status) : (paymentId ? 'CAPTURED' : 'UNKNOWN');
 			rawForServer = JSON.stringify(result);
+			console.log('[CYBERSOURCE] Result is object: id=', result.id, 'status=', result.status);
 		}
+
+		console.log('[CYBERSOURCE] Sending to server: payment_id=', paymentId, 'payment_status=', paymentStatus, 'raw_result length=', typeof rawForServer === 'string' ? rawForServer.length : 0);
 
 		return $.ajax({
 			url: config.ajaxUrl,
@@ -160,7 +166,9 @@
 				return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
 			}).join(''));
 			var payload = JSON.parse(jsonStr);
-			return { jti: payload.jti || null };
+			var jti = payload.jti || (payload.data && payload.data.jti) || (payload.payload && payload.payload.jti) || payload.id || (payload.data && payload.data.id) || payload.transactionId || null;
+			console.log('[CYBERSOURCE] parseCompleteMandateJwt: payload keys=', Object.keys(payload), 'jti found=', jti || 'none');
+			return { jti: jti || null };
 		} catch (e) {
 			return null;
 		}

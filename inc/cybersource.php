@@ -768,10 +768,45 @@ function boniface_cybersource_ajax_record_payment() {
 	}
 	$raw_result = is_string( $raw_result ) ? trim( $raw_result ) : '';
 
+	error_log( '[CYBERSOURCE][RECORD] === INCOMING REQUEST ===' );
+	error_log( '[CYBERSOURCE][RECORD] POST keys: ' . implode( ', ', array_keys( $_POST ) ) );
+	error_log( '[CYBERSOURCE][RECORD] raw_result length=' . strlen( $raw_result ) . ' first_char=' . ( $raw_result !== '' ? substr( $raw_result, 0, 1 ) : 'empty' ) . ' starts_with_eyJ=' . ( strpos( $raw_result, 'eyJ' ) === 0 ? 'yes' : 'no' ) . ' starts_with_brace=' . ( strpos( $raw_result, '{' ) === 0 ? 'yes' : 'no' ) );
+	if ( $raw_result !== '' && strlen( $raw_result ) <= 500 ) {
+		error_log( '[CYBERSOURCE][RECORD] raw_result full: ' . $raw_result );
+	} elseif ( $raw_result !== '' ) {
+		error_log( '[CYBERSOURCE][RECORD] raw_result first 120 chars: ' . substr( $raw_result, 0, 120 ) );
+		error_log( '[CYBERSOURCE][RECORD] raw_result last 80 chars: ' . substr( $raw_result, -80 ) );
+	}
+
+	// If raw_result is a JSON object wrapping a JWT (e.g. complete() returned { paymentResponse: "eyJ..." }), unwrap it.
+	if ( $raw_result !== '' && strpos( $raw_result, '{' ) === 0 ) {
+		$decoded = json_decode( $raw_result, true );
+		error_log( '[CYBERSOURCE][RECORD] raw_result is JSON object, keys: ' . ( is_array( $decoded ) ? implode( ', ', array_keys( $decoded ) ) : 'decode_failed' ) );
+		if ( is_array( $decoded ) ) {
+			foreach ( array( 'paymentResponse', 'token', 'jwt', 'data', 'result', 'completeResponse' ) as $key ) {
+				if ( isset( $decoded[ $key ] ) && is_string( $decoded[ $key ] ) && strpos( $decoded[ $key ], 'eyJ' ) === 0 && substr_count( $decoded[ $key ], '.' ) === 2 ) {
+					$raw_result = trim( $decoded[ $key ] );
+					error_log( '[CYBERSOURCE][RECORD] Unwrapped JWT from key: ' . $key . ' new length=' . strlen( $raw_result ) );
+					break;
+				}
+			}
+		}
+	}
+
 	// If client sent no payment_id but raw_result is a JWT (completeMandate response), extract jti and log parsed payload.
 	if ( $raw_result !== '' && strpos( $raw_result, 'eyJ' ) === 0 && substr_count( $raw_result, '.' ) === 2 ) {
 		$payload = boniface_cybersource_jwt_decode_payload( $raw_result );
-		if ( is_array( $payload ) ) {
+		if ( $payload === null ) {
+			error_log( '[CYBERSOURCE][RECORD] JWT decode failed (payload is null).' );
+		} elseif ( ! is_array( $payload ) ) {
+			error_log( '[CYBERSOURCE][RECORD] JWT decode returned non-array: ' . gettype( $payload ) );
+		} else {
+			// Log top-level keys to see actual payload structure.
+			error_log( '[CYBERSOURCE][RECORD] JWT payload top-level keys: ' . implode( ', ', array_keys( $payload ) ) );
+
+			// Log full payload structure (safe: nested arrays/objects shown as keys only to avoid PII/card data).
+			error_log( '[CYBERSOURCE][RECORD] JWT payload (safe dump): ' . wp_json_encode( boniface_cybersource_safe_payload_dump( $payload ) ) );
+
 			// Log parsed JWT claims (safe only: no nested content/card data).
 			$log_claims = array(
 				'jti'   => isset( $payload['jti'] ) ? $payload['jti'] : null,
@@ -785,15 +820,68 @@ function boniface_cybersource_ajax_record_payment() {
 			}
 			error_log( '[CYBERSOURCE][RECORD] Parsed JWT payload (safe claims): ' . wp_json_encode( $log_claims ) );
 
-			if ( $payment_id === '' && isset( $payload['jti'] ) && is_string( $payload['jti'] ) ) {
+			// Extract jti from top-level or common nested paths (completeResponse format may vary).
+			$jti = '';
+			$jti_source = '';
+			if ( isset( $payload['jti'] ) && is_string( $payload['jti'] ) ) {
 				$jti = trim( $payload['jti'] );
-				if ( $jti !== '' ) {
-					$payment_id = $jti;
-					if ( $status === '' || $status === 'UNKNOWN' ) {
-						$status = 'CAPTURED';
+				$jti_source = 'payload.jti';
+			} elseif ( isset( $payload['data']['jti'] ) && is_string( $payload['data']['jti'] ) ) {
+				$jti = trim( $payload['data']['jti'] );
+				$jti_source = 'payload.data.jti';
+			} elseif ( isset( $payload['payload']['jti'] ) && is_string( $payload['payload']['jti'] ) ) {
+				$jti = trim( $payload['payload']['jti'] );
+				$jti_source = 'payload.payload.jti';
+			} elseif ( isset( $payload['id'] ) && is_string( $payload['id'] ) ) {
+				$jti = trim( $payload['id'] );
+				$jti_source = 'payload.id';
+			} elseif ( isset( $payload['data']['id'] ) && is_string( $payload['data']['id'] ) ) {
+				$jti = trim( $payload['data']['id'] );
+				$jti_source = 'payload.data.id';
+			} elseif ( isset( $payload['transactionId'] ) && is_string( $payload['transactionId'] ) ) {
+				$jti = trim( $payload['transactionId'] );
+				$jti_source = 'payload.transactionId';
+			} else {
+				// Single nested object (e.g. payload has only "data" or "payload" key).
+				foreach ( array( 'data', 'payload', 'content', 'result' ) as $key ) {
+					if ( isset( $payload[ $key ] ) && is_array( $payload[ $key ] ) ) {
+						$inner = $payload[ $key ];
+						if ( isset( $inner['jti'] ) && is_string( $inner['jti'] ) ) {
+							$jti = trim( $inner['jti'] );
+							$jti_source = 'payload.' . $key . '.jti';
+							break;
+						}
+						if ( isset( $inner['id'] ) && is_string( $inner['id'] ) ) {
+							$jti = trim( $inner['id'] );
+							$jti_source = 'payload.' . $key . '.id';
+							break;
+						}
+						if ( isset( $inner['transactionId'] ) && is_string( $inner['transactionId'] ) ) {
+							$jti = trim( $inner['transactionId'] );
+							$jti_source = 'payload.' . $key . '.transactionId';
+							break;
+						}
+					}
+					if ( $jti !== '' ) {
+						break;
 					}
 				}
 			}
+			error_log( '[CYBERSOURCE][RECORD] jti extraction: source=' . ( $jti_source ?: 'none' ) . ' value=' . ( $jti !== '' ? $jti : 'empty' ) );
+
+			if ( $payment_id === '' && $jti !== '' ) {
+				$payment_id = $jti;
+				if ( $status === '' || $status === 'UNKNOWN' ) {
+					$status = 'CAPTURED';
+				}
+				error_log( '[CYBERSOURCE][RECORD] Set payment_id from JWT, status=CAPTURED' );
+			}
+		}
+	} else {
+		if ( $raw_result === '' ) {
+			error_log( '[CYBERSOURCE][RECORD] raw_result empty, skipping JWT parse.' );
+		} else {
+			error_log( '[CYBERSOURCE][RECORD] raw_result does not look like JWT (starts_with_eyJ=' . ( strpos( $raw_result, 'eyJ' ) === 0 ? 'yes' : 'no' ) . ' dot_count=' . substr_count( $raw_result, '.' ) . '), skipping JWT parse.' );
 		}
 	}
 
@@ -805,8 +893,8 @@ function boniface_cybersource_ajax_record_payment() {
 	error_log( '[CYBERSOURCE][RECORD] status=' . $status . ' payment_id=' . $payment_id );
 	error_log( '[CYBERSOURCE][RECORD] amount=' . $amount . ' currency=' . $currency );
 	error_log( '[CYBERSOURCE][RECORD] name=' . $name . ' email=' . $email . ' phone=' . $phone );
-	error_log( '[CYBERSOURCE][RECORD] raw_result=' . ( $raw_result !== '' ? substr( $raw_result, 0, 80 ) . '...' : '' ) );
-	error_log( '[CYBERSOURCE][RECORD] is_confirmed_success=' . ( $is_confirmed_success ? 'yes' : 'no' ) );
+	error_log( '[CYBERSOURCE][RECORD] raw_result length=' . strlen( $raw_result ) . ' preview=' . ( $raw_result !== '' ? substr( $raw_result, 0, 80 ) . '...' : 'empty' ) );
+	error_log( '[CYBERSOURCE][RECORD] is_confirmed_success=' . ( $is_confirmed_success ? 'yes' : 'no' ) . ' (payment_id_empty=' . ( $payment_id === '' ? 'yes' : 'no' ) . ' status_in_allowed=' . ( in_array( $status, array( 'CAPTURED', 'AUTHORIZED', 'PENDING' ), true ) ? 'yes' : 'no' ) . ')' );
 
 	if ( $is_confirmed_success && $amount > 0 ) {
 		do_action( 'boniface_donation_payment_success', array(
@@ -824,6 +912,32 @@ function boniface_cybersource_ajax_record_payment() {
 
 	wp_send_json( array( 'success' => true, 'recorded' => $is_confirmed_success && $amount > 0 ) );
 	return;
+}
+
+/**
+ * Dump payload for logging: scalars as-is, arrays/objects as list of keys (one level) to avoid PII/card data.
+ *
+ * @param array $payload Decoded JWT payload.
+ * @param int   $depth   Current depth (internal).
+ * @return array Safe structure for wp_json_encode.
+ */
+function boniface_cybersource_safe_payload_dump( $payload, $depth = 0 ) {
+	$out = array();
+	$max_depth = 2;
+	foreach ( $payload as $k => $v ) {
+		if ( is_array( $v ) ) {
+			if ( $depth >= $max_depth ) {
+				$out[ $k ] = '[NESTED ' . count( $v ) . ' keys]';
+			} else {
+				$out[ $k ] = array( '_keys' => array_keys( $v ) );
+			}
+		} elseif ( is_object( $v ) ) {
+			$out[ $k ] = '[OBJECT]';
+		} else {
+			$out[ $k ] = $v;
+		}
+	}
+	return $out;
 }
 
 /**

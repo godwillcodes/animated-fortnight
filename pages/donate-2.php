@@ -56,38 +56,64 @@ get_header();
 
 <section class="max-w-7xl mx-auto my-24 px-6 lg:px-0 space-y-20">
 
-  <!-- DONATION FORM (primary CTA — comes first) -->
-  <div id="donation-form" class="max-w-5xl mx-auto scroll-mt-8">
-    <div class="donate-card rounded-3xl shadow-xl border border-neutral-200/60 bg-white overflow-hidden">
-      <?php $donation_stats = boniface_donation_stats(); ?>
-      <div class="donate-card-header px-8 pt-10 pb-8 text-center" style="background: linear-gradient(135deg, #0f6041 0%, #1a7a54 50%, #0f6041 100%);">
-        <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-white/15 backdrop-blur-sm mb-5">
-          <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
-          </svg>
-        </div>
-        <h2 class="text-3xl font-bold text-white tracking-tight">Support the Work</h2>
-        <p class="mt-2 text-white/80 text-base">Every contribution fuels the movement for change.</p>
-
-        <!-- Donation progress stats -->
-        <div class="mt-8 pt-6 border-t border-white/15 flex items-center justify-center gap-8">
-          <div>
-            <p class="text-2xl md:text-3xl font-extrabold text-white tracking-tight leading-none">
-              <?php echo esc_html( $donation_stats['total_formatted'] ); ?>
-            </p>
-            <p class="text-xs text-white/60 mt-1 font-medium">raised</p>
+  <!-- MESSAGE + DONATION FORM (side by side on large screens) -->
+  <div id="donation-form" class="scroll-mt-8">
+    <div class="grid lg:grid-cols-[1fr_1.1fr] gap-10 lg:gap-14 items-start">
+      <!-- Letter / message card -->
+      <div class="order-2 lg:order-1">
+        <div class="rounded-3xl border border-neutral-200/80 bg-white shadow-lg overflow-hidden">
+          <div class="px-8 py-8 md:px-10 md:py-10">
+            <p class="text-sm font-semibold uppercase tracking-widest mb-6" style="color: #0f6041;">A note from Boniface</p>
+            <div class="prose prose-neutral max-w-none text-neutral-700 leading-relaxed space-y-5">
+              <p class="text-lg font-medium text-neutral-900">Hey friend,</p>
+              <p>Change must be fought for. I've spent my life fighting for justice, accountability, and dignity for every Kenyan.</p>
+              <p>We're now taking this fight to State House. I'm touring the country to meet wananchi, hear their stories, and co-create <strong class="text-neutral-900">The People's Manifesto</strong> — a vision shaped by your voices.</p>
+              <p>Your support, no matter how small, helps build the Kenya we all deserve: just, equal, free, and safe for every child, family, and community.</p>
+              <p>We promise transparency in accounting for all donations.</p>
+              <p>Thank you for standing with us.</p>
+              <p class="pt-2 font-semibold text-neutral-900">Love and Courage</p>
+            </div>
           </div>
-          <div class="w-px h-10 bg-white/15"></div>
-          <div>
-            <p class="text-2xl md:text-3xl font-extrabold text-white tracking-tight leading-none">
-              <?php echo esc_html( number_format( $donation_stats['count'] ) ); ?>
-            </p>
-            <p class="text-xs text-white/60 mt-1 font-medium">donation<?php echo $donation_stats['count'] !== 1 ? 's' : ''; ?></p>
+          <div class="px-8 py-4 md:px-10 border-t border-neutral-100 text-center">
+            <p class="text-xs text-neutral-500">Every contribution is accounted for and used to advance the movement.</p>
           </div>
         </div>
       </div>
-      <div class="px-8 py-10">
-        <?php get_template_part('components/payment/payment', 'form'); ?>
+
+      <!-- Donation form card -->
+      <div class="order-1 lg:order-2 max-w-2xl lg:max-w-none">
+        <div class="donate-card rounded-3xl shadow-xl border border-neutral-200/60 bg-white overflow-hidden">
+          <?php $donation_stats = boniface_donation_stats(); ?>
+          <div class="donate-card-header px-8 pt-10 pb-8 text-center" style="background: linear-gradient(135deg, #0f6041 0%, #1a7a54 50%, #0f6041 100%);">
+            <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-white/15 backdrop-blur-sm mb-5">
+              <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
+              </svg>
+            </div>
+            <h2 class="text-3xl font-bold text-white tracking-tight">Support the Work</h2>
+            <p class="mt-2 text-white/80 text-base">Every contribution fuels the movement for change.</p>
+
+            <!-- Donation progress stats -->
+            <div class="mt-8 pt-6 border-t border-white/15 flex items-center justify-center gap-8">
+              <div>
+                <p class="text-2xl md:text-3xl font-extrabold text-white tracking-tight leading-none">
+                  <?php echo esc_html( $donation_stats['total_formatted'] ); ?>
+                </p>
+                <p class="text-xs text-white/60 mt-1 font-medium">raised</p>
+              </div>
+              <div class="w-px h-10 bg-white/15"></div>
+              <div>
+                <p class="text-2xl md:text-3xl font-extrabold text-white tracking-tight leading-none">
+                  <?php echo esc_html( number_format( $donation_stats['count'] ) ); ?>
+                </p>
+                <p class="text-xs text-white/60 mt-1 font-medium">donation<?php echo $donation_stats['count'] !== 1 ? 's' : ''; ?></p>
+              </div>
+            </div>
+          </div>
+          <div class="px-8 py-10">
+            <?php get_template_part('components/payment/payment', 'form'); ?>
+          </div>
+        </div>
       </div>
     </div>
   </div>

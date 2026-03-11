@@ -144,6 +144,30 @@
 	}
 
 	function recordPayment(result) {
+		var paymentId = '';
+		var paymentStatus = 'UNKNOWN';
+		var rawForServer = result;
+
+		console.log('[CYBERSOURCE] recordPayment() called. result type=', typeof result);
+
+		if (typeof result === 'string' && result.indexOf('eyJ') === 0) {
+			var parsed = parseCompleteMandateJwt(result);
+			console.log('[CYBERSOURCE] After parseCompleteMandateJwt: parsed=', parsed, 'jti=', parsed ? parsed.jti : 'N/A');
+			if (parsed) {
+				paymentId = parsed.jti || '';
+				paymentStatus = parsed.jti ? 'CAPTURED' : 'UNKNOWN';
+				console.log('[CYBERSOURCE] Parsed completeMandate JWT: jti=' + (parsed.jti || '') + ' payment_status=' + paymentStatus);
+			}
+			rawForServer = result;
+		} else if (result && typeof result === 'object') {
+			paymentId = (result.id != null) ? String(result.id) : '';
+			paymentStatus = (result.status != null) ? String(result.status) : (paymentId ? 'CAPTURED' : 'UNKNOWN');
+			rawForServer = JSON.stringify(result);
+			console.log('[CYBERSOURCE] Result is object: id=', result.id, 'status=', result.status, '-> paymentId=', paymentId, 'paymentStatus=', paymentStatus);
+		}
+
+		console.log('[CYBERSOURCE] Sending to server: payment_id=', paymentId, 'payment_status=', paymentStatus, 'raw_result type=', typeof rawForServer, 'raw_result length=', typeof rawForServer === 'string' ? rawForServer.length : 0);
+
 		return $.ajax({
 			url: config.ajaxUrl,
 			type: 'POST',
@@ -156,11 +180,33 @@
 				amount: parseFloat($('#amount').val()) || 0,
 				currency: 'USD',
 				message: $('#message').val(),
-				payment_id: (result && result.id) || '',
-				payment_status: (result && result.status) || 'UNKNOWN',
-				raw_result: JSON.stringify(result || {})
+				payment_id: paymentId,
+				payment_status: paymentStatus,
+				raw_result: rawForServer
 			}
 		});
+	}
+
+	/**
+	 * Parse completeMandate response JWT payload (Base64url). Returns { jti } or null.
+	 * Tries top-level jti and nested paths (e.g. data.jti, payload.jti, id) for different SDK response formats.
+	 */
+	function parseCompleteMandateJwt(jwtStr) {
+		try {
+			var parts = (typeof jwtStr === 'string') ? jwtStr.trim().split('.') : [];
+			if (parts.length !== 3) return null;
+			var payloadB64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+			var jsonStr = decodeURIComponent(atob(payloadB64).split('').map(function (c) {
+				return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+			}).join(''));
+			var payload = JSON.parse(jsonStr);
+			var jti = payload.jti || (payload.data && payload.data.jti) || (payload.payload && payload.payload.jti) || payload.id || (payload.data && payload.data.id) || payload.transactionId || null;
+			console.log('[CYBERSOURCE] parseCompleteMandateJwt: payload keys=', Object.keys(payload), 'jti found=', jti || 'none');
+			return { jti: jti || null };
+		} catch (e) {
+			console.warn('[CYBERSOURCE] JWT parse error:', e);
+			return null;
+		}
 	}
 
 	/* ── Script loader ────────────────────────────────────── */
@@ -222,8 +268,13 @@
 							resolved = true;
 							clearTimeout(tid);
 							$('#donation-payment-skeleton').addClass('hidden');
-							console.log('[CYBERSOURCE] up.show() resolved:', typeof v, v);
-							resolve(v);
+							console.log('[CYBERSOURCE] up.show() resolved. tt type=', typeof v);
+							if (typeof v === 'string') {
+								console.log('[CYBERSOURCE] tt (transient token) length=', v.length, 'starts_with_eyJ=', v.indexOf('eyJ') === 0, 'dot_count=', (v.match(/\./g) || []).length);
+							} else if (v && typeof v === 'object') {
+								console.log('[CYBERSOURCE] tt (transient token) keys=', Object.keys(v));
+							}
+							resolve({ up: up, tt: v });
 						}
 					}
 					function fail(e) {
@@ -253,6 +304,14 @@
 							});
 					}, 150);
 				});
+			})
+			.then(function (obj) {
+				// Per CyberSource doc: call up.complete(tt) to process payment; completeResponse contains transaction outcome.
+				var up = obj.up;
+				var tt = obj.tt;
+				if (!up || !tt) return Promise.reject(new Error('No payment token received.'));
+				console.log('[CYBERSOURCE] Calling up.complete(tt). tt type=', typeof tt);
+				return up.complete(tt);
 			});
 	}
 
@@ -292,21 +351,24 @@
 				return runUnifiedCheckout(ctx, res.client_library, res.client_library_integrity);
 			})
 			.then(function (result) {
-				console.log('[CYBERSOURCE] === completeMandate RESULT ===');
+				console.log('[CYBERSOURCE] === completeResponse from up.complete(tt) ===');
 				console.log('[CYBERSOURCE] Result type:', typeof result);
-				console.log('[CYBERSOURCE] Result value:', JSON.stringify(result, null, 2));
-
-				if (typeof result === 'string' && result.indexOf('eyJ') === 0) {
-					console.log('[CYBERSOURCE] Got transient token (completeMandate may have processed internally).');
-					console.log('[CYBERSOURCE] Token length:', result.length);
-				}
-
-				if (result && typeof result === 'object') {
+				if (typeof result === 'string') {
+					console.log('[CYBERSOURCE] Result length:', result.length, 'starts_with_eyJ:', result.indexOf('eyJ') === 0);
+					// Decode payload (middle part) and log keys for debugging.
+					try {
+						var parts = result.split('.');
+						if (parts.length === 3) {
+							var pl = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
+							var payload = JSON.parse(decodeURIComponent(pl.split('').map(function(c) { return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2); }).join('')));
+							console.log('[CYBERSOURCE] completeResponse JWT payload top-level keys:', Object.keys(payload));
+						}
+					} catch (e) { console.warn('[CYBERSOURCE] Could not decode result payload:', e); }
+				} else if (result && typeof result === 'object') {
 					console.log('[CYBERSOURCE] Result keys:', Object.keys(result));
-					if (result.paymentResponse) {
-						console.log('[CYBERSOURCE] paymentResponse:', result.paymentResponse);
-					}
+					if (result.paymentResponse) console.log('[CYBERSOURCE] result.paymentResponse type:', typeof result.paymentResponse, 'length:', typeof result.paymentResponse === 'string' ? result.paymentResponse.length : 'n/a');
 				}
+				console.log('[CYBERSOURCE] Result value (truncated):', typeof result === 'string' ? result.substring(0, 100) + '...' : JSON.stringify(result).substring(0, 200) + '...');
 
 				recordPayment(result).always(function () {
 					console.log('[CYBERSOURCE] Payment recorded on server.');

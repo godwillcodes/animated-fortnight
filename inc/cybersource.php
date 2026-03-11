@@ -285,28 +285,41 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 	);
 	if ( ! empty( $bill_to ) ) {
 		$order_info['billTo'] = $bill_to;
+		// shipTo has a stricter schema than billTo. Keep only supported address/name fields.
+		$ship_to = array();
+		foreach ( array( 'firstName', 'lastName', 'address1', 'address2', 'address3', 'address4', 'buildingNumber', 'locality', 'administrativeArea', 'postalCode', 'country', 'district' ) as $key ) {
+			if ( isset( $bill_to[ $key ] ) && $bill_to[ $key ] !== '' ) {
+				$ship_to[ $key ] = $bill_to[ $key ];
+			}
+		}
+		$order_info['shipTo'] = $ship_to; // Keep shipping aligned with billing for DM/follow-on signals.
 	}
 
 	$payload = array(
 		'targetOrigins'       => array( $origin ),
 		'clientVersion'       => '0.34',
-		'allowedCardNetworks' => array( 'VISA', 'MASTERCARD' ),
-		'allowedPaymentTypes' => array( 'PANENTRY', 'CLICKTOPAY', 'GOOGLEPAY' ),
+		'allowedCardNetworks' => array( 'VISA', 'MASTERCARD', 'AMEX', 'JCB', 'DISCOVER' ),
+		'allowedPaymentTypes' => array( 'PANENTRY', 'CHECK', 'CLICKTOPAY', 'GOOGLEPAY' ),
 		'country'             => 'KE',
 		'locale'              => 'en_US',
 		'captureMandate'      => array(
 			'billingType'              => 'FULL',
 			'requestEmail'             => true,
 			'requestPhone'             => true,
-			'requestShipping'          => false,
+			'requestShipping'          => true, // Required for DM/follow-on; we send shipTo = billTo and log it.
 			'showAcceptedNetworkIcons' => true,
 		),
 		'completeMandate' => array(
-			'type'                     => 'CAPTURE',
+			'type'                     => 'PREFER_AUTH',
 			'decisionManager'          => true,
 			'consumerAuthentication'    => true,
 		),
-		'orderInformation' => $order_info,
+		'data' => array(
+			'orderInformation'            => $order_info,
+			'clientReferenceInformation'  => array(
+				'code' => $client_ref,
+			),
+		),
 	);
 
 	$body    = wp_json_encode( $payload );
@@ -314,6 +327,8 @@ function boniface_cybersource_get_capture_context( $amount, $currency = 'USD', $
 
 	error_log( '[CYBERSOURCE][CAPTURE_CTX] === CAPTURE CONTEXT REQUEST (completeMandate) ===' );
 	error_log( '[CYBERSOURCE][CAPTURE_CTX] origin=' . $origin . ' amount=' . $total_amount . ' currency=' . $currency . ' ref=' . $client_ref );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] billTo=' . ( isset( $order_info['billTo'] ) ? wp_json_encode( $order_info['billTo'] ) : '{}' ) );
+	error_log( '[CYBERSOURCE][CAPTURE_CTX] shipTo(same_as_billTo)=' . ( isset( $order_info['shipTo'] ) ? wp_json_encode( $order_info['shipTo'] ) : '{}' ) );
 	error_log( '[CYBERSOURCE][CAPTURE_CTX] MODE: completeMandate type=CAPTURE (CyberSource processes payment in widget)' );
 	error_log( '[CYBERSOURCE][CAPTURE_CTX] payload_size=' . strlen( $body ) . ' bytes' );
 	boniface_cybersource_log_merchant_verification( $config, $headers, 'CAPTURE_CTX' );
@@ -478,7 +493,10 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 	error_log( '[CYBERSOURCE][PAYMENT] PHP=' . PHP_VERSION . ' WP=' . get_bloginfo( 'version' ) . ' time=' . gmdate( 'c' ) );
 	error_log( '[CYBERSOURCE][PAYMENT] token_parts=' . count( $token_parts ) . ' token_length=' . strlen( $transient_token_jwt ) );
 	error_log( '[CYBERSOURCE][PAYMENT] amount=' . $total_amount . ' currency=' . $currency . ' ref=' . $client_ref );
+	// Use same billing as shipping for Decision Manager / follow-on services; tokenized with capture context.
+	$ship_to = $bill_to;
 	error_log( '[CYBERSOURCE][PAYMENT] billTo: ' . wp_json_encode( $bill_to ) );
+	error_log( '[CYBERSOURCE][PAYMENT] shipTo (same as billing): ' . wp_json_encode( $ship_to ) );
 
 	if ( count( $token_parts ) === 3 ) {
 		$token_payload_b64 = strtr( $token_parts[1], '-_', '+/' );
@@ -513,7 +531,8 @@ function boniface_cybersource_process_payment( $transient_token_jwt, $amount, $c
 				'totalAmount' => $total_amount,
 				'currency'    => $currency,
 			),
-			'billTo' => $bill_to,
+			'billTo'  => $bill_to,
+			'shipTo'  => $ship_to,
 		),
 	);
 
@@ -714,28 +733,15 @@ function boniface_cybersource_ajax_capture_context() {
 
 	$bill_to = array();
 	if ( $name || $email ) {
-		$first = '';
-		$last  = '';
-		if ( $name ) {
-			$parts = preg_split( '/\s+/', trim( $name ), 2 );
-			$first = $parts[0];
-			$last  = isset( $parts[1] ) ? $parts[1] : $parts[0];
-		}
-		$phone_digits = preg_replace( '/[^0-9]/', '', $phone );
-
-		$bill_to = array(
-			'firstName'          => $first ?: 'Donor',
-			'lastName'           => $last ?: 'Donor',
-			'email'              => $email ?: 'donor@example.com',
-			'phoneNumber'        => strlen( $phone_digits ) >= 7 ? $phone_digits : '0000000000',
-			'address1'           => '1 Main Street',
-			'locality'           => 'Nairobi',
-			'administrativeArea' => 'Nairobi',
-			'postalCode'         => '00100',
-			'country'            => 'KE',
-			'buildingNumber'     => '1',
-		);
+		$bill_to = boniface_cybersource_build_bill_to( $name, $email, true );
 		error_log( '[CYBERSOURCE][AJAX] billTo for capture context: ' . wp_json_encode( $bill_to ) );
+		$ship_to_log = array();
+		foreach ( array( 'firstName', 'lastName', 'address1', 'address2', 'address3', 'address4', 'buildingNumber', 'locality', 'administrativeArea', 'postalCode', 'country', 'district' ) as $key ) {
+			if ( isset( $bill_to[ $key ] ) && $bill_to[ $key ] !== '' ) {
+				$ship_to_log[ $key ] = $bill_to[ $key ];
+			}
+		}
+		error_log( '[CYBERSOURCE][AJAX] shipTo for capture context (schema-safe): ' . wp_json_encode( $ship_to_log ) );
 	}
 
 	$result = boniface_cybersource_get_capture_context( $amount, $currency, $origin, $bill_to );
@@ -762,26 +768,286 @@ function boniface_cybersource_ajax_record_payment() {
 	$message    = isset( $_POST['message'] ) ? sanitize_textarea_field( wp_unslash( $_POST['message'] ) ) : '';
 	$payment_id = isset( $_POST['payment_id'] ) ? sanitize_text_field( wp_unslash( $_POST['payment_id'] ) ) : '';
 	$status     = isset( $_POST['payment_status'] ) ? sanitize_text_field( wp_unslash( $_POST['payment_status'] ) ) : '';
-	$raw_result = isset( $_POST['raw_result'] ) ? sanitize_textarea_field( wp_unslash( $_POST['raw_result'] ) ) : '';
+	$raw_result = isset( $_POST['raw_result'] ) ? wp_unslash( $_POST['raw_result'] ) : '';
+	$jwt_bill_to = array();
+	$jwt_ship_to = array();
+	$jwt_status  = '';
+	if ( is_array( $raw_result ) ) {
+		$raw_result = '';
+	}
+	$raw_result = is_string( $raw_result ) ? trim( $raw_result ) : '';
+
+	error_log( '[CYBERSOURCE][RECORD] === INCOMING REQUEST ===' );
+	error_log( '[CYBERSOURCE][RECORD] POST keys: ' . implode( ', ', array_keys( $_POST ) ) );
+	error_log( '[CYBERSOURCE][RECORD] raw_result length=' . strlen( $raw_result ) . ' first_char=' . ( $raw_result !== '' ? substr( $raw_result, 0, 1 ) : 'empty' ) . ' starts_with_eyJ=' . ( strpos( $raw_result, 'eyJ' ) === 0 ? 'yes' : 'no' ) . ' starts_with_brace=' . ( strpos( $raw_result, '{' ) === 0 ? 'yes' : 'no' ) );
+	if ( $raw_result !== '' && strlen( $raw_result ) <= 500 ) {
+		error_log( '[CYBERSOURCE][RECORD] raw_result full: ' . $raw_result );
+	} elseif ( $raw_result !== '' ) {
+		error_log( '[CYBERSOURCE][RECORD] raw_result first 120 chars: ' . substr( $raw_result, 0, 120 ) );
+		error_log( '[CYBERSOURCE][RECORD] raw_result last 80 chars: ' . substr( $raw_result, -80 ) );
+	}
+
+	// If raw_result is a JSON object wrapping a JWT (e.g. complete() returned { paymentResponse: "eyJ..." }), unwrap it.
+	if ( $raw_result !== '' && strpos( $raw_result, '{' ) === 0 ) {
+		$decoded = json_decode( $raw_result, true );
+		error_log( '[CYBERSOURCE][RECORD] raw_result is JSON object, keys: ' . ( is_array( $decoded ) ? implode( ', ', array_keys( $decoded ) ) : 'decode_failed' ) );
+		if ( is_array( $decoded ) ) {
+			foreach ( array( 'paymentResponse', 'token', 'jwt', 'data', 'result', 'completeResponse' ) as $key ) {
+				if ( isset( $decoded[ $key ] ) && is_string( $decoded[ $key ] ) && strpos( $decoded[ $key ], 'eyJ' ) === 0 && substr_count( $decoded[ $key ], '.' ) === 2 ) {
+					$raw_result = trim( $decoded[ $key ] );
+					error_log( '[CYBERSOURCE][RECORD] Unwrapped JWT from key: ' . $key . ' new length=' . strlen( $raw_result ) );
+					break;
+				}
+			}
+		}
+	}
+
+	// If client sent no payment_id but raw_result is a JWT (completeMandate response), extract jti and log parsed payload.
+	if ( $raw_result !== '' && strpos( $raw_result, 'eyJ' ) === 0 && substr_count( $raw_result, '.' ) === 2 ) {
+		$payload = boniface_cybersource_jwt_decode_payload( $raw_result );
+		if ( $payload === null ) {
+			error_log( '[CYBERSOURCE][RECORD] JWT decode failed (payload is null).' );
+		} elseif ( ! is_array( $payload ) ) {
+			error_log( '[CYBERSOURCE][RECORD] JWT decode returned non-array: ' . gettype( $payload ) );
+		} else {
+			// Log top-level keys to see actual payload structure.
+			error_log( '[CYBERSOURCE][RECORD] JWT payload top-level keys: ' . implode( ', ', array_keys( $payload ) ) );
+
+			// Log full payload structure (safe: nested arrays/objects shown as keys only to avoid PII/card data).
+			error_log( '[CYBERSOURCE][RECORD] JWT payload (safe dump): ' . wp_json_encode( boniface_cybersource_safe_payload_dump( $payload ) ) );
+
+			// Log parsed JWT claims (safe only: no nested content/card data).
+			$log_claims = array(
+				'jti'   => isset( $payload['jti'] ) ? $payload['jti'] : null,
+				'iss'   => isset( $payload['iss'] ) ? $payload['iss'] : null,
+				'type'  => isset( $payload['type'] ) ? $payload['type'] : null,
+				'iat'   => isset( $payload['iat'] ) ? $payload['iat'] : null,
+				'exp'   => isset( $payload['exp'] ) ? $payload['exp'] : null,
+			);
+			if ( isset( $payload['metadata'] ) && is_array( $payload['metadata'] ) ) {
+				$log_claims['metadata'] = $payload['metadata'];
+			}
+			error_log( '[CYBERSOURCE][RECORD] Parsed JWT payload (safe claims): ' . wp_json_encode( $log_claims ) );
+
+			// Extract billTo/shipTo from completeMandate payload for accurate donation records.
+			$jwt_order_info = array();
+			if ( isset( $payload['details']['orderInformation'] ) && is_array( $payload['details']['orderInformation'] ) ) {
+				$jwt_order_info = $payload['details']['orderInformation'];
+			} elseif ( isset( $payload['orderInformation'] ) && is_array( $payload['orderInformation'] ) ) {
+				$jwt_order_info = $payload['orderInformation'];
+			}
+			if ( ! empty( $jwt_order_info['billTo'] ) && is_array( $jwt_order_info['billTo'] ) ) {
+				$jwt_bill_to = $jwt_order_info['billTo'];
+			}
+			if ( ! empty( $jwt_order_info['shipTo'] ) && is_array( $jwt_order_info['shipTo'] ) ) {
+				$jwt_ship_to = $jwt_order_info['shipTo'];
+			}
+			if ( isset( $payload['status'] ) && is_string( $payload['status'] ) ) {
+				$jwt_status = strtoupper( trim( $payload['status'] ) );
+			}
+
+			// Extract jti from top-level or common nested paths (completeResponse format may vary).
+			$jti = '';
+			$jti_source = '';
+			if ( isset( $payload['jti'] ) && is_string( $payload['jti'] ) ) {
+				$jti = trim( $payload['jti'] );
+				$jti_source = 'payload.jti';
+			} elseif ( isset( $payload['data']['jti'] ) && is_string( $payload['data']['jti'] ) ) {
+				$jti = trim( $payload['data']['jti'] );
+				$jti_source = 'payload.data.jti';
+			} elseif ( isset( $payload['payload']['jti'] ) && is_string( $payload['payload']['jti'] ) ) {
+				$jti = trim( $payload['payload']['jti'] );
+				$jti_source = 'payload.payload.jti';
+			} elseif ( isset( $payload['id'] ) && is_string( $payload['id'] ) ) {
+				$jti = trim( $payload['id'] );
+				$jti_source = 'payload.id';
+			} elseif ( isset( $payload['data']['id'] ) && is_string( $payload['data']['id'] ) ) {
+				$jti = trim( $payload['data']['id'] );
+				$jti_source = 'payload.data.id';
+			} elseif ( isset( $payload['transactionId'] ) && is_string( $payload['transactionId'] ) ) {
+				$jti = trim( $payload['transactionId'] );
+				$jti_source = 'payload.transactionId';
+			} else {
+				// Single nested object (e.g. payload has only "data" or "payload" key).
+				foreach ( array( 'data', 'payload', 'content', 'result' ) as $key ) {
+					if ( isset( $payload[ $key ] ) && is_array( $payload[ $key ] ) ) {
+						$inner = $payload[ $key ];
+						if ( isset( $inner['jti'] ) && is_string( $inner['jti'] ) ) {
+							$jti = trim( $inner['jti'] );
+							$jti_source = 'payload.' . $key . '.jti';
+							break;
+						}
+						if ( isset( $inner['id'] ) && is_string( $inner['id'] ) ) {
+							$jti = trim( $inner['id'] );
+							$jti_source = 'payload.' . $key . '.id';
+							break;
+						}
+						if ( isset( $inner['transactionId'] ) && is_string( $inner['transactionId'] ) ) {
+							$jti = trim( $inner['transactionId'] );
+							$jti_source = 'payload.' . $key . '.transactionId';
+							break;
+						}
+					}
+					if ( $jti !== '' ) {
+						break;
+					}
+				}
+			}
+			error_log( '[CYBERSOURCE][RECORD] jti extraction: source=' . ( $jti_source ?: 'none' ) . ' value=' . ( $jti !== '' ? $jti : 'empty' ) );
+
+			if ( $payment_id === '' && $jti !== '' ) {
+				$payment_id = $jti;
+				if ( $status === '' || $status === 'UNKNOWN' ) {
+					$status = 'CAPTURED';
+				}
+				error_log( '[CYBERSOURCE][RECORD] Set payment_id from JWT, status=CAPTURED' );
+			}
+		}
+	} else {
+		if ( $raw_result === '' ) {
+			error_log( '[CYBERSOURCE][RECORD] raw_result empty, skipping JWT parse.' );
+		} else {
+			error_log( '[CYBERSOURCE][RECORD] raw_result does not look like JWT (starts_with_eyJ=' . ( strpos( $raw_result, 'eyJ' ) === 0 ? 'yes' : 'no' ) . ' dot_count=' . substr_count( $raw_result, '.' ) . '), skipping JWT parse.' );
+		}
+	}
+
+	$allowed_statuses = array( 'CAPTURED', 'AUTHORIZED', 'PENDING' );
+	if ( $jwt_status !== '' && $status !== $jwt_status ) {
+		error_log( '[CYBERSOURCE][RECORD] Overriding client payment_status=' . $status . ' with JWT status=' . $jwt_status );
+		$status = $jwt_status;
+	}
+	$is_confirmed_success = ( $payment_id !== '' && $amount > 0 )
+		&& in_array( $status, $allowed_statuses, true );
 
 	error_log( '[CYBERSOURCE][RECORD] === completeMandate PAYMENT RESULT ===' );
 	error_log( '[CYBERSOURCE][RECORD] status=' . $status . ' payment_id=' . $payment_id );
 	error_log( '[CYBERSOURCE][RECORD] amount=' . $amount . ' currency=' . $currency );
 	error_log( '[CYBERSOURCE][RECORD] name=' . $name . ' email=' . $email . ' phone=' . $phone );
-	error_log( '[CYBERSOURCE][RECORD] raw_result=' . $raw_result );
+	error_log( '[CYBERSOURCE][RECORD] raw_result length=' . strlen( $raw_result ) . ' preview=' . ( $raw_result !== '' ? substr( $raw_result, 0, 80 ) . '...' : 'empty' ) );
+	error_log( '[CYBERSOURCE][RECORD] is_confirmed_success=' . ( $is_confirmed_success ? 'yes' : 'no' ) . ' (payment_id_empty=' . ( $payment_id === '' ? 'yes' : 'no' ) . ' status_in_allowed=' . ( in_array( $status, array( 'CAPTURED', 'AUTHORIZED', 'PENDING' ), true ) ? 'yes' : 'no' ) . ')' );
 
-	do_action( 'boniface_donation_payment_success', array(
-		'amount'      => $amount,
-		'currency'    => $currency,
-		'name'        => $name,
-		'email'       => $email,
-		'phone'       => $phone,
-		'message'     => $message,
-		'payment_id'  => $payment_id,
-	) );
+	if ( $is_confirmed_success && $amount > 0 ) {
+		$billing_data = array(
+			'country'  => isset( $_POST['billing_country'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_country'] ) ) : '',
+			'address'  => isset( $_POST['billing_address'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_address'] ) ) : '',
+			'city'     => isset( $_POST['billing_city'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_city'] ) ) : '',
+			'state'    => isset( $_POST['billing_state'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_state'] ) ) : '',
+			'postal'   => isset( $_POST['billing_postal'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_postal'] ) ) : '',
+		);
+		$has_posted_billing = implode( '', $billing_data ) !== '';
+		if ( ! $has_posted_billing && ! empty( $jwt_bill_to ) ) {
+			$billing_data = array(
+				'country'  => isset( $jwt_bill_to['country'] ) ? sanitize_text_field( $jwt_bill_to['country'] ) : '',
+				'address'  => isset( $jwt_bill_to['address1'] ) ? sanitize_text_field( $jwt_bill_to['address1'] ) : '',
+				'city'     => isset( $jwt_bill_to['locality'] ) ? sanitize_text_field( $jwt_bill_to['locality'] ) : '',
+				'state'    => isset( $jwt_bill_to['administrativeArea'] ) ? sanitize_text_field( $jwt_bill_to['administrativeArea'] ) : '',
+				'postal'   => isset( $jwt_bill_to['postalCode'] ) ? sanitize_text_field( $jwt_bill_to['postalCode'] ) : '',
+			);
+		} elseif ( ! $has_posted_billing ) {
+			// Some completeMandate JWTs omit billTo/shipTo in orderInformation; build a sane fallback.
+			$fallback_bill_to = boniface_cybersource_build_bill_to( $name, $email, true );
+			$billing_data = array(
+				'country'  => isset( $fallback_bill_to['country'] ) ? sanitize_text_field( $fallback_bill_to['country'] ) : '',
+				'address'  => isset( $fallback_bill_to['address1'] ) ? sanitize_text_field( $fallback_bill_to['address1'] ) : '',
+				'city'     => isset( $fallback_bill_to['locality'] ) ? sanitize_text_field( $fallback_bill_to['locality'] ) : '',
+				'state'    => isset( $fallback_bill_to['administrativeArea'] ) ? sanitize_text_field( $fallback_bill_to['administrativeArea'] ) : '',
+				'postal'   => isset( $fallback_bill_to['postalCode'] ) ? sanitize_text_field( $fallback_bill_to['postalCode'] ) : '',
+			);
+			error_log( '[CYBERSOURCE][RECORD] billing fallback source: build_bill_to()' );
+		}
+		$shipping_data = $billing_data;
+		if ( ! empty( $jwt_ship_to ) ) {
+			$shipping_data = array(
+				'country'  => isset( $jwt_ship_to['country'] ) ? sanitize_text_field( $jwt_ship_to['country'] ) : '',
+				'address'  => isset( $jwt_ship_to['address1'] ) ? sanitize_text_field( $jwt_ship_to['address1'] ) : '',
+				'city'     => isset( $jwt_ship_to['locality'] ) ? sanitize_text_field( $jwt_ship_to['locality'] ) : '',
+				'state'    => isset( $jwt_ship_to['administrativeArea'] ) ? sanitize_text_field( $jwt_ship_to['administrativeArea'] ) : '',
+				'postal'   => isset( $jwt_ship_to['postalCode'] ) ? sanitize_text_field( $jwt_ship_to['postalCode'] ) : '',
+			);
+		}
+		error_log( '[CYBERSOURCE][RECORD] billing: ' . wp_json_encode( $billing_data ) );
+		error_log( '[CYBERSOURCE][RECORD] shipping: ' . wp_json_encode( $shipping_data ) );
+		do_action( 'boniface_donation_payment_success', array(
+			'amount'      => $amount,
+			'currency'    => $currency,
+			'name'        => $name,
+			'email'       => $email,
+			'phone'       => $phone,
+			'message'     => $message,
+			'payment_id'  => $payment_id,
+			'billing'     => $billing_data,
+			'shipping'    => $shipping_data,
+		) );
+	} else {
+		error_log( '[CYBERSOURCE][RECORD] Not recording: success not confirmed or amount <= 0 (payment_id=' . $payment_id . ' status=' . $status . ' amount=' . $amount . ').' );
+	}
 
-	wp_send_json( array( 'success' => true, 'recorded' => true ) );
+	wp_send_json( array( 'success' => true, 'recorded' => $is_confirmed_success && $amount > 0 ) );
 	return;
+}
+
+/**
+ * Dump payload for logging: scalars as-is, arrays/objects as list of keys (one level) to avoid PII/card data.
+ *
+ * @param array $payload Decoded JWT payload.
+ * @param int   $depth   Current depth (internal).
+ * @return array Safe structure for wp_json_encode.
+ */
+function boniface_cybersource_safe_payload_dump( $payload, $depth = 0 ) {
+	$out = array();
+	$max_depth = 2;
+	foreach ( $payload as $k => $v ) {
+		if ( is_array( $v ) ) {
+			if ( $depth >= $max_depth ) {
+				$out[ $k ] = '[NESTED ' . count( $v ) . ' keys]';
+			} else {
+				$out[ $k ] = array( '_keys' => array_keys( $v ) );
+			}
+		} elseif ( is_object( $v ) ) {
+			$out[ $k ] = '[OBJECT]';
+		} else {
+			$out[ $k ] = $v;
+		}
+	}
+	return $out;
+}
+
+/**
+ * Decode JWT payload (middle part). No signature verification.
+ *
+ * @param string $jwt Raw JWT string.
+ * @return array|null Decoded payload array or null on failure.
+ */
+function boniface_cybersource_jwt_decode_payload( $jwt ) {
+	$jwt = is_string( $jwt ) ? trim( $jwt ) : '';
+	if ( $jwt === '' ) {
+		return null;
+	}
+	$parts = explode( '.', $jwt );
+	if ( count( $parts ) !== 3 ) {
+		return null;
+	}
+	$payload_b64 = strtr( $parts[1], '-_', '+/' );
+	$payload_json = base64_decode( $payload_b64, true );
+	if ( $payload_json === false ) {
+		return null;
+	}
+	$payload = json_decode( $payload_json, true );
+	return is_array( $payload ) ? $payload : null;
+}
+
+/**
+ * Decode JWT payload (middle part) and return jti claim. No signature verification.
+ *
+ * @param string $jwt Raw JWT string.
+ * @return string jti value or empty string.
+ */
+function boniface_cybersource_jwt_get_jti( $jwt ) {
+	$payload = boniface_cybersource_jwt_decode_payload( $jwt );
+	if ( ! is_array( $payload ) || ! isset( $payload['jti'] ) || ! is_string( $payload['jti'] ) ) {
+		return '';
+	}
+	return trim( $payload['jti'] );
 }
 
 /**
@@ -833,7 +1099,14 @@ function boniface_cybersource_ajax_process_payment() {
 		}
 
 		if ( $result['success'] ) {
-			do_action( 'boniface_donation_payment_success', array(
+			$billing_data = array(
+				'country'  => isset( $_POST['billing_country'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_country'] ) ) : '',
+				'address'  => isset( $_POST['billing_address'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_address'] ) ) : '',
+				'city'     => isset( $_POST['billing_city'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_city'] ) ) : '',
+				'state'    => isset( $_POST['billing_state'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_state'] ) ) : '',
+				'postal'   => isset( $_POST['billing_postal'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_postal'] ) ) : '',
+			);
+			$donation_data = array(
 				'amount'      => $amount,
 				'currency'    => $currency,
 				'name'        => $name,
@@ -841,14 +1114,12 @@ function boniface_cybersource_ajax_process_payment() {
 				'phone'       => $phone,
 				'message'     => isset( $_POST['message'] ) ? sanitize_textarea_field( wp_unslash( $_POST['message'] ) ) : '',
 				'payment_id'  => isset( $result['id'] ) ? $result['id'] : '',
-				'billing'     => array(
-					'country'  => isset( $_POST['billing_country'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_country'] ) ) : '',
-					'address'  => isset( $_POST['billing_address'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_address'] ) ) : '',
-					'city'     => isset( $_POST['billing_city'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_city'] ) ) : '',
-					'state'    => isset( $_POST['billing_state'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_state'] ) ) : '',
-					'postal'   => isset( $_POST['billing_postal'] ) ? sanitize_text_field( wp_unslash( $_POST['billing_postal'] ) ) : '',
-				),
-			) );
+				'billing'     => $billing_data,
+				'shipping'    => $billing_data,
+			);
+			error_log( '[CYBERSOURCE][DONATION_SUCCESS] billing: ' . wp_json_encode( $billing_data ) );
+			error_log( '[CYBERSOURCE][DONATION_SUCCESS] shipping (same as billing): ' . wp_json_encode( $donation_data['shipping'] ) );
+			do_action( 'boniface_donation_payment_success', $donation_data );
 		}
 
 		wp_send_json( $result );

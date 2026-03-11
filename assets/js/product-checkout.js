@@ -114,6 +114,30 @@
 	}
 
 	function recordPayment(result) {
+		var paymentId = '';
+		var paymentStatus = 'UNKNOWN';
+		var rawForServer = result;
+
+		console.log('[CYBERSOURCE] recordPayment() called. result type=', typeof result);
+
+		if (typeof result === 'string' && result.indexOf('eyJ') === 0) {
+			var parsed = parseCompleteMandateJwt(result);
+			console.log('[CYBERSOURCE] After parseCompleteMandateJwt: parsed=', parsed, 'jti=', parsed ? parsed.jti : 'N/A');
+			if (parsed) {
+				paymentId = parsed.jti || '';
+				paymentStatus = parsed.jti ? 'CAPTURED' : 'UNKNOWN';
+				console.log('[CYBERSOURCE] Parsed completeMandate JWT: jti=' + (parsed.jti || '') + ' payment_status=' + paymentStatus);
+			}
+			rawForServer = result;
+		} else if (result && typeof result === 'object') {
+			paymentId = (result.id != null) ? String(result.id) : '';
+			paymentStatus = (result.status != null) ? String(result.status) : (paymentId ? 'CAPTURED' : 'UNKNOWN');
+			rawForServer = JSON.stringify(result);
+			console.log('[CYBERSOURCE] Result is object: id=', result.id, 'status=', result.status);
+		}
+
+		console.log('[CYBERSOURCE] Sending to server: payment_id=', paymentId, 'payment_status=', paymentStatus, 'raw_result length=', typeof rawForServer === 'string' ? rawForServer.length : 0);
+
 		return $.ajax({
 			url: config.ajaxUrl,
 			type: 'POST',
@@ -126,11 +150,28 @@
 				amount: price,
 				currency: 'USD',
 				message: 'Product purchase: ' + title,
-				payment_id: (result && result.id) || '',
-				payment_status: (result && result.status) || 'UNKNOWN',
-				raw_result: JSON.stringify(result || {})
+				payment_id: paymentId,
+				payment_status: paymentStatus,
+				raw_result: rawForServer
 			}
 		});
+	}
+
+	function parseCompleteMandateJwt(jwtStr) {
+		try {
+			var parts = (typeof jwtStr === 'string') ? jwtStr.trim().split('.') : [];
+			if (parts.length !== 3) return null;
+			var payloadB64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+			var jsonStr = decodeURIComponent(atob(payloadB64).split('').map(function (c) {
+				return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+			}).join(''));
+			var payload = JSON.parse(jsonStr);
+			var jti = payload.jti || (payload.data && payload.data.jti) || (payload.payload && payload.payload.jti) || payload.id || (payload.data && payload.data.id) || payload.transactionId || null;
+			console.log('[CYBERSOURCE] parseCompleteMandateJwt: payload keys=', Object.keys(payload), 'jti found=', jti || 'none');
+			return { jti: jti || null };
+		} catch (e) {
+			return null;
+		}
 	}
 
 	/* ── Unified Checkout runner ─────────────────────────── */
@@ -154,8 +195,22 @@
 			.then(function (up) {
 				return new Promise(function (resolve, reject) {
 					var resolved = false;
-					function done(v) { if (!resolved) { resolved = true; clearTimeout(tid); hideEl('product-payment-skeleton'); resolve(v); } }
-					function fail(e) { if (!resolved) { resolved = true; clearTimeout(tid); hideEl('product-payment-skeleton'); reject(e); } }
+					function done(v) {
+						if (!resolved) {
+							resolved = true;
+							clearTimeout(tid);
+							hideEl('product-payment-skeleton');
+							resolve({ up: up, tt: v });
+						}
+					}
+					function fail(e) {
+						if (!resolved) {
+							resolved = true;
+							clearTimeout(tid);
+							hideEl('product-payment-skeleton');
+							reject(e);
+						}
+					}
 					var tid = setTimeout(function () {
 						var has = (sel && (sel.querySelector('iframe') || sel.children.length)) ||
 								  (screen && (screen.querySelector('iframe') || screen.children.length));
@@ -168,6 +223,12 @@
 							.catch(function (err) { fail(new Error((err && err.message) || 'Payment could not be processed.')); });
 					}, 150);
 				});
+			})
+			.then(function (obj) {
+				var up = obj.up;
+				var tt = obj.tt;
+				if (!up || !tt) return Promise.reject(new Error('No payment token received.'));
+				return up.complete(tt);
 			});
 	}
 

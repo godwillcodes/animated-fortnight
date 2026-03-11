@@ -845,7 +845,6 @@ function boniface_cybersource_ajax_record_payment() {
 			if ( isset( $payload['status'] ) && is_string( $payload['status'] ) ) {
 				$jwt_status = strtoupper( trim( $payload['status'] ) );
 			}
-
 			// Extract jti from top-level or common nested paths (completeResponse format may vary).
 			$jti = '';
 			$jti_source = '';
